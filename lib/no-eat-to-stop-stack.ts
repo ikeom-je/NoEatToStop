@@ -7,6 +7,9 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iot from 'aws-cdk-lib/aws-iot';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 export interface NoEatToStopStackProps extends cdk.StackProps {
@@ -376,6 +379,184 @@ export class NoEatToStopStack extends cdk.Stack {
         ],
       },
     });
+
+    // ========================================
+    // Monitoring & Analytics
+    // ========================================
+
+    // SNS Topic for critical alerts
+    const alertTopic = new sns.Topic(this, 'CriticalAlertTopic', {
+      topicName: `noeatstop-critical-alerts-${stage}`,
+      displayName: 'NoEatToStop Critical Alerts',
+    });
+
+    // CloudWatch Log Group for edge device
+    const edgeLogGroup = new logs.LogGroup(this, 'EdgeDeviceLogGroup', {
+      logGroupName: `/noeatstop/${stage}/edge-device`,
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Lambda error alarm
+    const lambdaErrorAlarm = new cloudwatch.Alarm(this, 'LambdaErrorAlarm', {
+      alarmName: `noeatstop-lambda-errors-${stage}`,
+      alarmDescription: 'Lambda function errors exceeding threshold',
+      metric: apiHandler.metricErrors({
+        period: cdk.Duration.minutes(5),
+        statistic: 'Sum',
+      }),
+      threshold: 5,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+    });
+    lambdaErrorAlarm.addAlarmAction({
+      bind: () => ({ alarmActionArn: alertTopic.topicArn }),
+    });
+
+    // CloudWatch Dashboard
+    const dashboard = new cloudwatch.Dashboard(this, 'MonitoringDashboard', {
+      dashboardName: `NoEatToStop-${stage}`,
+    });
+
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown: `# NoEatToStop System Dashboard (${stage})`,
+        width: 24,
+        height: 1,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'API Gateway Requests',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'AWS/ApiGateway',
+            metricName: 'Count',
+            dimensionsMap: { ApiName: this.api.restApiName },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Sum',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'AWS/ApiGateway',
+            metricName: '4XXError',
+            dimensionsMap: { ApiName: this.api.restApiName },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Sum',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'AWS/ApiGateway',
+            metricName: '5XXError',
+            dimensionsMap: { ApiName: this.api.restApiName },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Sum',
+          }),
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'API Gateway Latency',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'AWS/ApiGateway',
+            metricName: 'Latency',
+            dimensionsMap: { ApiName: this.api.restApiName },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Average',
+          }),
+        ],
+        width: 12,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Lambda Invocations & Errors',
+        left: [
+          apiHandler.metricInvocations({ period: cdk.Duration.minutes(5) }),
+          apiHandler.metricErrors({ period: cdk.Duration.minutes(5) }),
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Lambda Duration',
+        left: [
+          apiHandler.metricDuration({ period: cdk.Duration.minutes(5) }),
+        ],
+        width: 12,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'DynamoDB Read/Write Capacity',
+        left: [
+          this.mealSessionsTable.metricConsumedReadCapacityUnits({ period: cdk.Duration.minutes(5) }),
+          this.eatingStatesTable.metricConsumedReadCapacityUnits({ period: cdk.Duration.minutes(5) }),
+        ],
+        right: [
+          this.mealSessionsTable.metricConsumedWriteCapacityUnits({ period: cdk.Duration.minutes(5) }),
+          this.eatingStatesTable.metricConsumedWriteCapacityUnits({ period: cdk.Duration.minutes(5) }),
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Custom Metrics - Detection Accuracy',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'NoEatToStop',
+            metricName: 'FaceDetectionAccuracy',
+            dimensionsMap: { Stage: stage },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Average',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'NoEatToStop',
+            metricName: 'ChewingDetectionAccuracy',
+            dimensionsMap: { Stage: stage },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Average',
+          }),
+        ],
+        width: 12,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'TV Control',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'NoEatToStop',
+            metricName: 'TVControlSuccessRate',
+            dimensionsMap: { Stage: stage },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Average',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'NoEatToStop',
+            metricName: 'ChewingStopCount',
+            dimensionsMap: { Stage: stage },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Sum',
+          }),
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Session Duration',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'NoEatToStop',
+            metricName: 'SessionDuration',
+            dimensionsMap: { Stage: stage },
+            period: cdk.Duration.minutes(5),
+            statistic: 'Average',
+          }),
+        ],
+        width: 12,
+      }),
+    );
 
     // ========================================
     // Outputs
