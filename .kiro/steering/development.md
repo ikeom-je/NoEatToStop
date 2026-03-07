@@ -58,6 +58,40 @@
 - 永続化が必要な成果物は適切なディレクトリ（`design/`, `docs/` 等）に移動する
 - 不要になったファイルは適宜削除する
 
+## 環境設定ファイル（.env.local）
+
+プロジェクトルートの `.env.local` にAWS認証情報やリージョンなどの個人設定を記載する。
+
+### .env.local の項目
+
+| 変数名               | 説明                         | 例           |
+| -------------------- | ---------------------------- | ------------ |
+| `AWS_PROFILE`        | 使用するAWS CLIプロファイル  | `default`    |
+| `AWS_DEFAULT_REGION` | AWSリージョン                | `us-east-1`  |
+| `CDK_DEFAULT_REGION` | CDKデプロイ先リージョン      | `us-east-1`  |
+| `ENVIRONMENT`        | デプロイ環境名               | `dev`        |
+| `FRONTEND_URL`       | デプロイ後のフロントエンドURL | (デプロイ後に設定) |
+| `API_GATEWAY_URL`    | デプロイ後のAPI Gateway URL  | (デプロイ後に設定) |
+
+### 使い方
+
+```bash
+# 開発・デプロイ前に必ず読み込む
+source .env.local
+
+# CDKデプロイ
+npx cdk deploy --context stage=$ENVIRONMENT
+
+# デプロイスクリプト経由（自動的にsourceされる）
+./scripts/deploy-all.sh
+```
+
+### 重要なルール
+
+- `.env.local` はGit管理外（`.gitignore` に追加済み）
+- AWS関連エラーが発生した場合、まず `.env.local` の設定値を確認すること
+- ハードコードされたAWSアカウントID・リージョン・URLは禁止。必ず環境変数を参照する
+
 ## 開発環境のセットアップ
 
 ### 必須ツール

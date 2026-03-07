@@ -1,11 +1,21 @@
 #!/bin/bash
 set -e
 
-STAGE=${1:-dev}
-REGION=${AWS_REGION:-ap-northeast-1}
-OUTPUTS_FILE="working/cdk-outputs-${STAGE}.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "=== Frontend Deployment (stage: $STAGE) ==="
+# .env.local から環境変数を読み込み
+if [ -f "$PROJECT_ROOT/.env.local" ]; then
+  set -a
+  source "$PROJECT_ROOT/.env.local"
+  set +a
+fi
+
+STAGE=${ENVIRONMENT:-${1:-dev}}
+REGION=${CDK_DEFAULT_REGION:-${AWS_DEFAULT_REGION:-ap-northeast-1}}
+OUTPUTS_FILE="$PROJECT_ROOT/working/cdk-outputs-${STAGE}.json"
+
+echo "=== Frontend Deployment (stage: $STAGE, region: $REGION) ==="
 
 if [ ! -f "$OUTPUTS_FILE" ]; then
   echo "Error: CDK outputs not found at $OUTPUTS_FILE"
@@ -13,16 +23,14 @@ if [ ! -f "$OUTPUTS_FILE" ]; then
   exit 1
 fi
 
-API_URL=$(cat "$OUTPUTS_FILE" | node -e "
-  const fs = require('fs');
-  const data = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+API_URL=$(node -e "
+  const data = require('${OUTPUTS_FILE}');
   const stack = data['NoEatToStopStack-${STAGE}'];
   console.log(stack.ApiEndpoint);
 ")
 
-WEBAPP_BUCKET=$(cat "$OUTPUTS_FILE" | node -e "
-  const fs = require('fs');
-  const data = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+WEBAPP_BUCKET=$(node -e "
+  const data = require('${OUTPUTS_FILE}');
   const stack = data['NoEatToStopStack-${STAGE}'];
   console.log(stack.WebAppBucketName);
 ")
@@ -30,9 +38,8 @@ WEBAPP_BUCKET=$(cat "$OUTPUTS_FILE" | node -e "
 echo "API URL: $API_URL"
 echo "Bucket: $WEBAPP_BUCKET"
 
-cd frontend
+cd "$PROJECT_ROOT/frontend"
 VITE_API_BASE_URL="${API_URL}" npm run build
 aws s3 sync dist/ "s3://${WEBAPP_BUCKET}/" --delete --region "${REGION}"
-cd ..
 
 echo "Frontend deployed successfully."
