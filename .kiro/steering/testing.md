@@ -40,12 +40,12 @@
 ```bash
 npm run test:unit
 # または
-turbo run test:unit
+npm run test:unit
 ```
 
 **配置場所**:
 ```
-src/
+lib/
 ├── services/
 │   ├── meal-service.ts
 │   └── __tests__/
@@ -85,7 +85,7 @@ describe('MealService', () => {
 ```bash
 source .env.credentials && npm run test:integ
 # または
-source .env.credentials && turbo run test:integ
+source .env.credentials && npm run test:integ
 ```
 
 **Colima 環境での実行**:
@@ -101,7 +101,7 @@ source .env.credentials && npm run test:integ
 
 **配置場所**:
 ```
-src/
+lib/
 ├── services/
 │   └── __tests__/
 │       └── integration/
@@ -466,7 +466,7 @@ source .env.credentials && npm run test:e2e
 
 ```bash
 # 変更がない場合はキャッシュから結果を取得
-turbo run test:unit test:integ
+npm run test:unit test:integ
 ```
 
 ## Testing Anti-Patterns

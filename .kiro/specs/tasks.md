@@ -70,36 +70,32 @@
     - Validate state transition logic with configurable thresholds
     - _Requirements: 2.2, 2.3, 2.4_
 
-- [ ] 5. Build IoT Greengrass edge processing components
-  - [x] 5.1 Create Local Lambda function for edge processing
-    - Implement computer vision with OpenCV for face detection (configurable threshold)
-    - Add mouth position detection and chewing motion analysis (configurable thresholds)
-    - Create meal start detection (dish placement + eating motion) and meal end detection (dish cleanup)
-    - Implement multiple children tracking with configurable child count
-    - Add adult detection exclusion with ON/OFF setting
-    - Implement 10-second video buffer with configurable duration
-    - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_
-
-  - [x] 5.2 Implement TV control interface module
-    - Create TV control interface for external system integration
-    - Implement mock TV control service for testing and development
-    - Add TV control manager for request tracking and status management
-    - Implement TV control status monitoring for management interface
-    - Add error handling and retry mechanism for TV control failures
-    - _Requirements: 1.3, 1.4, 6.4, 6.6, 8.1, 8.2, 8.3, 8.4_
-
-  - [x] 5.3 Set up Greengrass deployment configuration
-    - Create Greengrass component definitions for Raspberry Pi 3B
-    - Configure local Lambda deployment settings with IoT Greengrass experience
-    - Set up device certificates and permissions for remote control and management
+- [ ] 5. Build Docker-based IoT Greengrass edge processing with IoT Core integration
+  - [ ] 5.1 Create Docker environment for IoT Greengrass Core
+    - Create docker-compose.yml for Greengrass Core container (machine-independent)
+    - Configure device mount for USB camera (/dev/video0)
+    - Set up AWS credentials and IoT certificates volume mapping
     - _Requirements: 2.1, 5.4_
 
-  - [x]* 5.4 Create edge processing and TV control integration tests
-    - Mock 1080P/30frame USB camera input for testing
-    - Test TV control interface functionality with mock service
-    - Validate TV control request tracking and status management
-    - Test integration between meal state manager and TV control interface
-    - Verify TV control interface calls when chewing stops are detected
+  - [ ] 5.2 Create edge processing service (TypeScript)
+    - Implement edge processor with frame analysis logic
+    - Add eating state determination with configurable thresholds
+    - Implement IoT Core MQTT publish for state change notifications
+    - Create meal start/end detection logic
+    - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_
+
+  - [ ] 5.3 Implement TV control interface module
+    - Create TV control interface for external system integration
+    - Implement mock TV control service for testing and development
+    - Add error handling and retry mechanism for TV control failures
+    - Notify TV control events via IoT Core MQTT
+    - _Requirements: 1.3, 1.4, 6.4, 6.6, 8.1, 8.2, 8.3, 8.4_
+
+  - [ ] 5.4 Create edge processing unit tests
+    - Test edge processor with mock frame data
+    - Test TV control interface with mock service
+    - Test IoT Core publish integration
+    - Verify state transition logic with configurable thresholds
     - _Requirements: 2.1, 1.3, 1.4, 8.1, 8.2, 8.3, 8.4_
 
 - [ ] 6. Develop Vue.js web management interface
@@ -194,11 +190,10 @@
     - Add rollback and monitoring capabilities
     - _Requirements: 5.1, 5.2, 5.3_
 
-  - [x] 9.2 Configure Raspberry Pi 3B setup automation
-    - Create automated Raspberry Pi 3B configuration scripts
-    - Set up IoT Greengrass installation and device registration with remote control capabilities
-    - Add 1080P/30frame USB camera setup and Panasonic TV control hardware configuration
-    - Configure Alexa integration for voice control fallback
+  - [x] 9.2 Configure Docker-based edge device setup automation
+    - Create docker-compose based setup for any host machine (Raspberry Pi, PC, etc.)
+    - Set up IoT Greengrass installation and device registration via Docker
+    - Add USB camera device mount configuration
     - _Requirements: 5.4, 2.1_
 
   - [x] 9.3 Create comprehensive system documentation

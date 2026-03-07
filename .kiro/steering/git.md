@@ -139,10 +139,9 @@ feat(component): add new feature
 
 ### 含めるべきもの
 
-- **ロックファイル**: `package-lock.json`, `pnpm-lock.yaml`
-- **設定テンプレート**: `.env.example`, `.env.credentials.example`
+- **ロックファイル**: `package-lock.json`
 - **CI/CD設定**: `.github/workflows/`
-- **Kiro設定**: `.kiro/steering/`
+- **Kiro設定**: `.kiro/steering/`, `.kiro/specs/`
 
 ## Commit Frequency
 

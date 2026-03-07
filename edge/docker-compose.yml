@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  greengrass-core:
+    image: amazon/aws-iot-greengrass:latest
+    container_name: noeatstop-gg-core
+    privileged: true
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./greengrass-v2:/greengrass/v2
+      - ./certs:/greengrass/v2/certs
+      - ./config:/greengrass/v2/config
+      # USB カメラデバイスマウント（ホストに応じて変更）
+      # - /dev/video0:/dev/video0
+    environment:
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - PROVISION=${PROVISION:-false}
+      - THING_NAME=${THING_NAME:-noeatstop-edge-device}
+      - THING_GROUP_NAME=${THING_GROUP_NAME:-noeatstop-devices-dev}
+    restart: unless-stopped
+    networks:
+      - noeatstop-edge
+
+networks:
+  noeatstop-edge:
+    driver: bridge
