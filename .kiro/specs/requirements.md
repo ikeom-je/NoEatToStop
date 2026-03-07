@@ -9,7 +9,7 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 ## Glossary
 
 - **NoEatToStopシステム**: 食事動作監視によるテレビ制御システム
-- **エッジデバイス**: Raspberry Pi 3B + USBカメラによる映像取得・処理装置
+- **エッジデバイス**: Docker上のIoT Greengrass Coreコンテナによる映像取得・処理装置（マシン非依存、Raspberry Pi等で動作）
 - **食事動作**: 咀嚼動作の継続的な実行状態
 - **咀嚼動作**: 口の動きによる食べ物を噛む行為
 - **食事開始条件**: 食器の配置後に人間が食事を口に運ぶ状態
@@ -28,7 +28,7 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 
 #### Acceptance Criteria
 
-1. WHEN USBカメラ（1080P/30frame）がRaspberry Pi 3Bに接続されている THEN エッジデバイス SHALL 常時映像を取得する
+1. WHEN USBカメラ（1080P/30frame）がエッジデバイス（Docker上のGreengrass Coreコンテナ）に接続されている THEN エッジデバイス SHALL 常時映像を取得する
 2. WHEN 食器の配置後に人間が食事を口に運ぶ状態が検出された THEN システム SHALL 詳細な映像内容判定を開始する
 3. WHEN 咀嚼動作が継続的に検出されている THEN システム SHALL パナソニック製テレビの電源をON状態に維持する
 4. WHEN 咀嚼動作が10秒間停止した THEN システム SHALL テレビデバイスの電源を即座にOFFにする
@@ -85,7 +85,7 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 2. WHEN フロントエンドアプリケーションをデプロイする THEN システム SHALL Vue.jsアプリをビルドしてS3にアップロード、CloudFront経由で配信する
 3. WHEN デプロイを実行する THEN システム SHALL 自動化されたデプロイスクリプトでAPI URLの動的設定とファイルアップロードを実行する
 4. WHEN 開発環境とプロダクション環境を管理する THEN システム SHALL 環境別の設定管理機能を提供する
-4. WHEN システムをテストする THEN 開発時 SHALL MacOS環境でのテスト実行をサポートし、本番時 SHALL Raspberry Pi 3B環境での動作をサポートする
+4. WHEN システムをテストする THEN 開発時・本番時ともに SHALL Docker上のIoT Greengrass Coreコンテナでマシン非依存な動作をサポートする
 
 ### Requirement 6
 

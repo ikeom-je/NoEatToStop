@@ -4,24 +4,26 @@
 
 ```
 no-eat-to-stop-system/
-├── .env.local              # Local environment variables
+├── .env.local              # Local environment variables (git excluded)
+├── .claude/                # Claude Code settings (git excluded)
 ├── .kiro/                  # Kiro IDE configuration and steering rules
+│   ├── specs/              # Project specifications (requirements.md, design.md, tasks.md)
+│   └── steering/           # Development guidelines and policies
 ├── PRFAQ.md               # Product requirements and FAQ (Japanese)
 ├── bin/                   # CDK application entry points
 ├── lib/                   # CDK stack definitions and constructs
-├── prompt-history.md      # Prompt that the agent run with 
+├── docs/                  # User guides and documentation
+├── scripts/               # Deployment and setup scripts
+├── working/               # Temporary files and intermediate data (git excluded)
 ├── package.json           # Node.js dependencies and scripts
 └── tsconfig.json          # TypeScript compiler configuration
 ```
 ## Development Settings(must)
-- .env.local has the paramters and settings for this Project
+- .env.local has the parameters and settings for this Project
 - AWS account and related params in .env.local
 - you must set aws account and related params like AWS Profile, Region and so on.
-- If AWS Error occurs, check if aws params and other environ parames are correct.
-- Environment variables for dvelopment in .env.local
-
-## Prompt history
-- Agent must add prompt in prompt-history.md after 1 prompt finishs to run all.
+- If AWS Error occurs, check if aws params and other environ params are correct.
+- Environment variables for development in .env.local
 
 
 ## Key Directories

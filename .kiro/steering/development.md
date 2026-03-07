@@ -24,13 +24,13 @@
 
 | 場所              | 判断基準                                 | 例                                                                          | 対象読者               |
 | ----------------- | ---------------------------------------- | --------------------------------------------------------------------------- | ---------------------- |
-| `.kiro/steering/` | 「こうしなさい」（開発規約、手順）       | 「pnpmを使う」「DLQからリトライする手順」「turbo run test:unit の実行方法」 | AIエージェント、開発者 |
+| `.kiro/steering/` | 「こうしなさい」（開発規約、手順）       | 「npmを使う」「DLQからリトライする手順」「npm run test:unit の実行方法」 | AIエージェント、開発者 |
 | `design/`         | 「こうなっている理由」（設計判断、仕様） | 「SQSを使う理由」「状態遷移モデル」「トレースIDの伝播方法」                 | 開発者                 |
 | `docs/`           | 「こう使う」（ユーザー向け手順）         | 操作マニュアル、API仕様と使うべきタイミング                                 | ユーザー               |
 
 ### 重要な原則
 
-1. **永続化の責任**: `.kiro/specs/` と `.aidlc-docs/` は開発時の一時的なファイル。重要な設計判断や仕様は必ず `design/` に永続化すること
+1. **永続化の責任**: `.kiro/specs/`（`requirements.md`, `design.md`, `tasks.md`）は開発仕様の管理ファイル。重要な設計判断や仕様は必ず `design/` にも永続化すること
 2. **ADRの記録**: 複数の選択肢を検討した上で技術的判断を行った場合は `design/adr/` にArchitecture Decision Recordとして記録
 3. **ユーザーガイドの作成**: 外部公開APIの追加や、複雑な手順を要する操作を実装した場合は `docs/` にガイドを作成
 4. **設計書の更新**: データモデル変更時は `design/core-entities.md`、アーキテクチャ変更時は `design/architecture.md` を更新
@@ -96,8 +96,7 @@ cd no-eat-to-stop-system
 npm install
 
 # 3. 環境変数の設定
-cp .env.local.example .env.local
-# .env.local を編集して AWS 認証情報を設定
+# .env.local を作成して AWS 認証情報を設定
 
 # 4. Colima の起動（まだの場合）
 colima start --cpu 4 --memory 8

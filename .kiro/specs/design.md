@@ -2,10 +2,10 @@
 
 ## Overview
 
-NoEatToStopシステムは、エッジコンピューティングとクラウドベースの映像認識を組み合わせたハイブリッドアーキテクチャを採用します。Raspberry Piエッジデバイスでリアルタイム映像処理を行い、AWS IoT GreengrassとAmazon Kinesis Video Streamsを通じてクラウド側の高精度な認識処理と連携します。
+NoEatToStopシステムは、エッジコンピューティングとクラウドベースの映像認識を組み合わせたハイブリッドアーキテクチャを採用します。Docker上のIoT Greengrass Coreコンテナでリアルタイム映像処理を行い、IoT Core経由でのデータ通知とAmazon Kinesis Video Streamsを通じてクラウド側の高精度な認識処理と連携します。エッジ処理はDocker上で動作するためマシン非依存（Raspberry Pi、開発PC等）です。
 
 システムは以下の3つの主要コンポーネントで構成されます：
-1. **エッジデバイス層**: Raspberry Pi + IoT Greengrass + カメラ
+1. **エッジデバイス層**: Docker + IoT Greengrass Core + Local Lambda + カメラ
 2. **クラウド処理層**: KVS + Rekognition/Bedrock + Lambda
 3. **管理・制御層**: Vue.js SPA + CloudFront + S3
 
@@ -13,12 +13,13 @@ NoEatToStopシステムは、エッジコンピューティングとクラウド
 
 ```mermaid
 graph TB
-    subgraph "Edge Device (Raspberry Pi)"
+    subgraph "Edge Device (Docker Container)"
         Camera[USB Camera]
-        GG[IoT Greengrass Core]
+        GG[IoT Greengrass Core on Docker]
         LocalLambda[Local Lambda Function]
         LocalStorage[Local Video Storage]
         TVControl[TV Control Module]
+        IoTCorePub[IoT Core Publish]
     end
     
     subgraph "AWS Cloud"
@@ -43,7 +44,8 @@ graph TB
     GG --> LocalLambda
     LocalLambda --> LocalStorage
     LocalLambda --> TVControl
-    LocalLambda --> KVS
+    LocalLambda --> IoTCorePub
+    IoTCorePub --> KVS
     
     KVS --> ProcessingLambda
     ProcessingLambda --> Rekognition
@@ -66,23 +68,25 @@ graph TB
 
 #### Camera Module
 - **責任**: USB Webカメラからの映像取得
-- **技術**: OpenCV Python, V4L2
+- **技術**: OpenCV, V4L2（Docker内からデバイスマウント経由）
 - **仕様**: 1080P/30frame対応USBカメラ
 - **出力**: デフォルト640x360/30fps H.264ストリーム（管理画面で設定変更可能）
-- **インターフェース**: `/dev/video0` デバイス経由でのフレーム取得
+- **インターフェース**: Docker コンテナ内の `/dev/video0` デバイスマウント経由
 - **エラーハンドリング**: カメラ故障時は処理停止、TV制御も実行しない
 
-#### IoT Greengrass Core
+#### IoT Greengrass Core (Docker)
 - **責任**: エッジデバイスでのローカル処理とクラウド連携
-- **技術**: AWS IoT Greengrass v2
+- **技術**: AWS IoT Greengrass v2（Docker コンテナとして起動）
+- **実行環境**: docker-compose で管理、マシン非依存
 - **機能**:
   - Local Lambda関数の実行環境
   - デバイス証明書による認証
+  - IoT Core 経由でのデータ通知（MQTT Publish）
   - クラウドとの双方向通信
 
 #### Local Lambda Function
 - **責任**: エッジでの基本的な映像解析と制御判断
-- **技術**: Python 3.9, OpenCV, TensorFlow Lite
+- **技術**: TypeScript (Node.js 18)、Docker コンテナ内で実行
 - **処理内容**:
   - 顔検出（人の顔認識閾値設定可能）
   - 口の位置検出（口の位置認識閾値設定可能）
@@ -96,25 +100,29 @@ graph TB
   - 信頼度閾値：デフォルト80%
   - 映像バッファ：デフォルト10秒
   - 映像データ：デフォルト20秒間で判定
+- **データ通知**: IoT Core 経由で MQTT トピックに状態変化を Publish
+  - トピック: `noeatstop/{deviceId}/eating-state`
+  - トピック: `noeatstop/{deviceId}/tv-control`
 - **インターフェース**:
-  ```python
-  def lambda_handler(event, context):
-      # 設定値取得
-      config = get_system_config()
-      
-      # フレーム解析（顔・口・咀嚼検出）
-      frame_analysis = analyze_frame(video_frame, config)
-      
-      # 複数子供対応の状態判定
-      eating_state = determine_eating_state(frame_analysis, config.child_count)
-      
-      # TV制御（即座にOFF）
-      if eating_state == "not_eating_threshold_exceeded":
-          control_tv("OFF")
-      
-      # クラウド送信（信頼度が閾値未満の場合）
-      if frame_analysis.confidence < config.confidence_threshold:
-          send_to_kvs(video_segment)
+  ```typescript
+  // エッジ処理のメインループ
+  async function processFrame(frame: FrameData, config: SystemConfiguration): Promise<void> {
+    const analysis = analyzeFrame(frame, config);
+    const eatingState = determineEatingState(analysis, config.childCount);
+
+    // TV制御（即座にOFF）
+    if (eatingState === 'chewing_stopped_threshold_exceeded') {
+      await controlTV('OFF');
+    }
+
+    // IoT Core経由でクラウドに状態通知
+    await publishToIoTCore('noeatstop/device/eating-state', { state: eatingState, confidence: analysis.confidence });
+
+    // 信頼度が閾値未満の場合はKVSへ映像送信
+    if (analysis.confidence < config.confidenceThreshold) {
+      await sendToKVS(videoSegment);
+    }
+  }
   ```
 
 #### TV Control Module

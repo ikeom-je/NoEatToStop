@@ -67,8 +67,7 @@ cd no-eat-to-stop-system
 npm install
 
 # 3. Configure environment variables
-cp .env.local.example .env.local
-# Edit .env.local with your AWS credentials
+# .env.local を作成して AWS 認証情報を設定
 
 # 4. Start Colima (if not already running)
 colima start --cpu 4 --memory 8
@@ -96,8 +95,10 @@ For detailed Colima usage and troubleshooting, see [Environment Guide](.kiro/ste
 
 ```
 no-eat-to-stop-system/
-├── .env.local              # Environment variables (not in git)
+├── .env.local              # Environment variables (git excluded)
 ├── .kiro/                  # Kiro IDE configuration and steering rules
+│   ├── specs/              # Specifications (requirements.md, design.md, tasks.md)
+│   └── steering/           # Development guidelines and policies
 ├── PRFAQ.md               # Product requirements and FAQ (Japanese)
 ├── bin/                   # CDK application entry points
 ├── lib/                   # CDK stack definitions and constructs
@@ -105,7 +106,9 @@ no-eat-to-stop-system/
 │   ├── repositories/      # DynamoDB data access layer
 │   ├── services/          # Business logic services
 │   └── lambda/            # Lambda function implementations
-├── test/                  # Unit tests
+├── docs/                  # User guides and documentation
+├── scripts/               # Deployment and setup scripts
+├── working/               # Temporary files (git excluded)
 ├── package.json           # Node.js dependencies and scripts
 └── tsconfig.json          # TypeScript compiler configuration
 ```
@@ -312,8 +315,7 @@ After deployment, the web application will be accessible via the CloudFront URL 
 
 3. **Configure environment variables**:
    ```bash
-   cp .env.local.example .env.local
-   # Edit .env.local with your AWS credentials and configuration
+   # .env.local を作成して AWS 認証情報と設定を記述
    ```
 
 4. **Install dependencies**:
@@ -333,7 +335,7 @@ After deployment, the web application will be accessible via the CloudFront URL 
 
 ### Greengrass Development on macOS
 
-**Important**: Greengrass IPC (Inter-Process Communication) has fundamental limitations on macOS/Colima due to Unix domain socket restrictions. See [macOS IPC Limitations](docs/reports/MACOS_IPC_LIMITATIONS.md) for technical details.
+**Important**: Greengrass IPC (Inter-Process Communication) has fundamental limitations on macOS/Colima due to Unix domain socket restrictions.
 
 **Recommended Development Approach**:
 
@@ -423,8 +425,6 @@ colima start --arch aarch64 --cpu 4 --memory 8
 ### Greengrass Issues
 
 For Greengrass-specific troubleshooting:
-- [IPC Troubleshooting Report](docs/reports/IPC_TROUBLESHOOTING_REPORT.md) - Comprehensive IPC connection troubleshooting
-- [macOS IPC Limitations](docs/reports/MACOS_IPC_LIMITATIONS.md) - Technical details of macOS/Colima limitations
 - [Docker Development Guide](docs/guides/DOCKER_DEVELOPMENT_GUIDE.md) - Complete development environment setup
 
 ### General Troubleshooting
@@ -432,8 +432,6 @@ For Greengrass-specific troubleshooting:
 For more troubleshooting tips, see:
 - [Development Guide](.kiro/steering/development.md)
 - [Environment Guide](.kiro/steering/environment.md)
-- [IPC Troubleshooting Report](docs/reports/IPC_TROUBLESHOOTING_REPORT.md)
-- [macOS IPC Limitations](docs/reports/MACOS_IPC_LIMITATIONS.md)
 
 ## Security Features
 
@@ -451,22 +449,16 @@ For more troubleshooting tips, see:
 ## Project Status
 
 For current implementation status and next steps, see:
-- [Implementation Tasks](.kiro/specs/no-eat-to-stop-implementation/tasks.md) - Detailed task list with progress tracking
-- [Next Steps](NEXT_STEPS.md) - Quick reference for deployment and development
-- [Project Completion Report](docs/reports/PROJECT_COMPLETION_REPORT.md) - Overall project status
+- [Implementation Tasks](.kiro/specs/tasks.md) - Detailed task list with progress tracking
 
 ## Documentation
-
-For comprehensive documentation, see the [Documentation Index](docs/README.md):
 
 ### Quick Links
 - **[Installation Guide](docs/INSTALLATION.md)** - システムのインストール手順
 - **[User Manual](docs/USER_MANUAL.md)** - ユーザーマニュアル
 - **[Docker Development Guide](docs/guides/DOCKER_DEVELOPMENT_GUIDE.md)** - Docker開発環境のセットアップ
-- **[IPC Troubleshooting](docs/reports/IPC_TROUBLESHOOTING_REPORT.md)** - Greengrass IPC問題のトラブルシューティング
-- **[macOS Limitations](docs/reports/MACOS_IPC_LIMITATIONS.md)** - macOS/Colima環境の制限事項
 
 ### Specifications
-- [Requirements Document](.kiro/specs/no-eat-to-stop-system/requirements.md)
-- [Design Document](.kiro/specs/no-eat-to-stop-system/design.md)
-- [Implementation Tasks](.kiro/specs/no-eat-to-stop-implementation/tasks.md)
+- [Requirements Document](.kiro/specs/requirements.md)
+- [Design Document](.kiro/specs/design.md)
+- [Implementation Tasks](.kiro/specs/tasks.md)
