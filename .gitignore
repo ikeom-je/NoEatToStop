@@ -1,0 +1,40 @@
+# Claude Code settings
+.claude/
+
+# MCP server configuration (contains local environment settings)
+.mcp.json
+
+# Environment-specific files
+.env.local
+.env.credentials
+.env.*.local
+
+# Credentials and secrets
+*.pem
+*.key
+credentials.json
+
+# Working directory (temporary files and intermediate data)
+working/
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+cdk.out/
+*.js.map
+*.d.ts
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

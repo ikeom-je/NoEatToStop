@@ -74,16 +74,17 @@ Fixes #567
 
 ### Main Branches
 
-- **main**: 本番環境にデプロイ可能な状態を常に維持
-- **develop**: 開発中の統合ブランチ（使用する場合）
+- **main**: 本番環境にデプロイ可能な状態を常に維持。直接コミットしない
+- **dev**: 開発用のマージブランチ。機能ブランチはここからブランチを切り、ここにマージする
 
 ### Workflow
 
-1. mainから新しいブランチを作成
-2. 小さく頻繁にコミット
-3. プルリクエストを作成
-4. レビュー後にmainへマージ
-5. マージ後は速やかにブランチを削除
+1. `dev` ブランチから新しい機能ブランチを作成（例: `feature/meal-session-tracking`）
+2. 機能ブランチ上で小さく頻繁にコミット
+3. 機能の実装が完了したら、e2eテストを含む全テストがPASSすることを確認
+4. テストPASS後、`dev` ブランチにマージ（PRまたは直接マージ）
+5. マージ後は速やかに機能ブランチを削除
+6. リリース時に `dev` → `main` へマージ
 
 ## Pull Request Guidelines
 
@@ -161,7 +162,8 @@ feat(component): add new feature
 
 ### 基本方針
 
-- **feature → main**: Squash mergeを推奨（履歴を整理）
+- **feature → dev**: Squash mergeを推奨（履歴を整理）
+- **dev → main**: Mergeを使用（リリース履歴を維持）
 - **ローカル作業**: rebaseで履歴を整理してからpush
 - **共有ブランチ**: rebaseは避け、mergeを使用
 
@@ -171,9 +173,9 @@ feat(component): add new feature
 # ローカルブランチの整理
 git rebase -i HEAD~3
 
-# mainの最新を取り込む
+# devの最新を取り込む
 git fetch origin
-git rebase origin/main
+git rebase origin/dev
 ```
 
 ## Conflict Resolution
