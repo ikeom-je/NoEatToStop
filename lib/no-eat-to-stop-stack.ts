@@ -194,7 +194,96 @@ export class NoEatToStopStack extends cdk.Stack {
       },
     });
 
-    // API リソース定義（Lambda統合は Task 4 で実装）
+    // Lambda環境変数
+    const lambdaEnv = {
+      MEAL_SESSIONS_TABLE: this.mealSessionsTable.tableName,
+      EATING_STATES_TABLE: this.eatingStatesTable.tableName,
+      SYSTEM_SETTINGS_TABLE: this.systemSettingsTable.tableName,
+      VIDEO_BUCKET: this.videoBucket.bucketName,
+    };
+
+    // API Lambda 関数
+    const apiHandler = new lambda.Function(this, 'ApiHandler', {
+      functionName: `noeatstop-api-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.createMealSession',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    // 各ハンドラ用Lambda
+    const createSessionFn = apiHandler;
+    const getSessionFn = new lambda.Function(this, 'GetSessionHandler', {
+      functionName: `noeatstop-get-session-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getMealSession',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    const createStateFn = new lambda.Function(this, 'CreateStateHandler', {
+      functionName: `noeatstop-create-state-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.createEatingState',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    const getStatesFn = new lambda.Function(this, 'GetStatesHandler', {
+      functionName: `noeatstop-get-states-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getEatingStates',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    const getSettingFn = new lambda.Function(this, 'GetSettingHandler', {
+      functionName: `noeatstop-get-setting-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getSetting',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    const updateSettingFn = new lambda.Function(this, 'UpdateSettingHandler', {
+      functionName: `noeatstop-update-setting-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.updateSetting',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    // API リソース定義
     const mealSessionResource = this.api.root.addResource('meal-session');
     const mealSessionIdResource = mealSessionResource.addResource('{sessionId}');
 
@@ -207,30 +296,17 @@ export class NoEatToStopStack extends cdk.Stack {
     tvControlSessionResource.addResource('history');
 
     const settingsResource = this.api.root.addResource('settings');
-    settingsResource.addResource('{settingKey}');
+    const settingKeyResource = settingsResource.addResource('{settingKey}');
 
-    // Mock integration（Lambda統合前の仮実装）
-    const mockIntegration = new apigateway.MockIntegration({
-      integrationResponses: [{
-        statusCode: '200',
-        responseTemplates: {
-          'application/json': '{"message": "Not yet implemented"}',
-        },
-      }],
-      requestTemplates: {
-        'application/json': '{"statusCode": 200}',
-      },
-    });
+    // Lambda統合
+    mealSessionResource.addMethod('POST', new apigateway.LambdaIntegration(createSessionFn));
+    mealSessionIdResource.addMethod('GET', new apigateway.LambdaIntegration(getSessionFn));
 
-    const methodOptions: apigateway.MethodOptions = {
-      methodResponses: [{ statusCode: '200' }],
-    };
+    eatingStateResource.addMethod('POST', new apigateway.LambdaIntegration(createStateFn));
+    eatingStateSessionResource.addMethod('GET', new apigateway.LambdaIntegration(getStatesFn));
 
-    mealSessionResource.addMethod('POST', mockIntegration, methodOptions);
-    mealSessionIdResource.addMethod('GET', mockIntegration, methodOptions);
-
-    eatingStateResource.addMethod('POST', mockIntegration, methodOptions);
-    eatingStateSessionResource.addMethod('GET', mockIntegration, methodOptions);
+    settingKeyResource.addMethod('GET', new apigateway.LambdaIntegration(getSettingFn));
+    settingKeyResource.addMethod('PUT', new apigateway.LambdaIntegration(updateSettingFn));
 
     // ========================================
     // CloudFront Distribution

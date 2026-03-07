@@ -95,6 +95,28 @@ describe('NoEatToStopStack', () => {
     });
   });
 
+  describe('Lambda Functions', () => {
+    it('should create API handler Lambda functions', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'noeatstop-api-test',
+        Runtime: 'nodejs18.x',
+      });
+    });
+
+    it('should set environment variables on Lambda functions', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            MEAL_SESSIONS_TABLE: Match.anyValue(),
+            EATING_STATES_TABLE: Match.anyValue(),
+            SYSTEM_SETTINGS_TABLE: Match.anyValue(),
+            VIDEO_BUCKET: Match.anyValue(),
+          }),
+        },
+      });
+    });
+  });
+
   describe('CloudFront', () => {
     it('should create distribution with SPA error responses', () => {
       template.hasResourceProperties('AWS::CloudFront::Distribution', {
