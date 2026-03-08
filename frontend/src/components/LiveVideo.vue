@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { videoApi } from '@/services/apiService';
 
 const settingsStore = useSettingsStore();
 const lastUpdated = ref<string>('-');
 const isStreaming = ref(false);
+const isLoading = ref(false);
+const frameUrl = ref<string | null>(null);
+const errorMessage = ref<string | null>(null);
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 function startStreaming() {
   isStreaming.value = true;
+  errorMessage.value = null;
   refreshFrame();
   intervalId = setInterval(refreshFrame, settingsStore.config.liveVideoUpdateInterval * 1000);
 }
@@ -21,8 +26,17 @@ function stopStreaming() {
   }
 }
 
-function refreshFrame() {
-  lastUpdated.value = new Date().toLocaleTimeString('ja-JP');
+async function refreshFrame() {
+  isLoading.value = true;
+  try {
+    frameUrl.value = await videoApi.getLatestFrameUrl();
+    errorMessage.value = null;
+    lastUpdated.value = new Date().toLocaleTimeString('ja-JP');
+  } catch {
+    errorMessage.value = 'フレームの取得に失敗しました';
+  } finally {
+    isLoading.value = false;
+  }
 }
 
 onMounted(() => {
@@ -39,13 +53,23 @@ onUnmounted(() => {
     <h1 class="text-2xl font-bold">ライブ映像</h1>
 
     <div class="bg-white rounded-lg shadow p-4">
-      <div class="bg-gray-900 rounded-lg aspect-video flex items-center justify-center mb-4">
+      <div class="bg-gray-900 rounded-lg aspect-video flex items-center justify-center mb-4 overflow-hidden">
         <p v-if="!isStreaming" class="text-gray-400" data-testid="video-placeholder">
           映像を開始してください
         </p>
-        <p v-else class="text-gray-400" data-testid="video-streaming">
-          KVS ストリーミング ({{ settingsStore.config.videoResolution }})
+        <p v-else-if="errorMessage" class="text-red-400" data-testid="video-error">
+          {{ errorMessage }}
         </p>
+        <p v-else-if="isLoading && !frameUrl" class="text-gray-400" data-testid="video-loading">
+          読み込み中...
+        </p>
+        <img
+          v-else-if="frameUrl"
+          :src="frameUrl"
+          alt="ライブフレーム"
+          class="w-full h-full object-contain"
+          data-testid="video-frame"
+        />
       </div>
 
       <div class="flex items-center justify-between">

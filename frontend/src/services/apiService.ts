@@ -69,4 +69,11 @@ export const tvControlApi = {
   },
 };
 
+export const videoApi = {
+  async getLatestFrameUrl(): Promise<string> {
+    const { data } = await apiClient.get<{ url: string }>('/video/latest-frame');
+    return data.url;
+  },
+};
+
 export { apiClient };

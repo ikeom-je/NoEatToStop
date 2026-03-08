@@ -3,6 +3,8 @@ import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import LiveVideo from '@/components/LiveVideo.vue';
 
+const mockGetLatestFrameUrl = vi.fn();
+
 vi.mock('@/services/apiService', () => ({
   settingsApi: {
     getAll: vi.fn().mockResolvedValue({
@@ -24,11 +26,15 @@ vi.mock('@/services/apiService', () => ({
       tvControlRetryInterval: 3,
     }),
   },
+  videoApi: {
+    getLatestFrameUrl: (...args: unknown[]) => mockGetLatestFrameUrl(...args),
+  },
 }));
 
 describe('LiveVideo', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    mockGetLatestFrameUrl.mockReset();
   });
 
   it('should render title', () => {
@@ -47,10 +53,12 @@ describe('LiveVideo', () => {
   });
 
   it('should toggle to stop button after start', async () => {
+    mockGetLatestFrameUrl.mockResolvedValue('https://example.com/frame.jpg');
     const wrapper = mount(LiveVideo, {
       global: { plugins: [createPinia()] },
     });
     await wrapper.find('[data-testid="start-btn"]').trigger('click');
+    await vi.dynamicImportSettled();
     expect(wrapper.find('[data-testid="stop-btn"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="start-btn"]').exists()).toBe(false);
   });
@@ -62,11 +70,27 @@ describe('LiveVideo', () => {
     expect(wrapper.find('[data-testid="video-placeholder"]').exists()).toBe(true);
   });
 
-  it('should show streaming info when started', async () => {
+  it('should show video frame when streaming with valid URL', async () => {
+    mockGetLatestFrameUrl.mockResolvedValue('https://example.com/frame.jpg');
     const wrapper = mount(LiveVideo, {
       global: { plugins: [createPinia()] },
     });
     await wrapper.find('[data-testid="start-btn"]').trigger('click');
-    expect(wrapper.find('[data-testid="video-streaming"]').exists()).toBe(true);
+    await vi.dynamicImportSettled();
+    await wrapper.vm.$nextTick();
+    const frame = wrapper.find('[data-testid="video-frame"]');
+    expect(frame.exists()).toBe(true);
+    expect(frame.attributes('src')).toBe('https://example.com/frame.jpg');
+  });
+
+  it('should show error when frame fetch fails', async () => {
+    mockGetLatestFrameUrl.mockRejectedValue(new Error('Network error'));
+    const wrapper = mount(LiveVideo, {
+      global: { plugins: [createPinia()] },
+    });
+    await wrapper.find('[data-testid="start-btn"]').trigger('click');
+    await vi.dynamicImportSettled();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="video-error"]').exists()).toBe(true);
   });
 });
