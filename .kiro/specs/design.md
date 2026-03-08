@@ -11,55 +11,133 @@ NoEatToStopシステムは、エッジコンピューティングとクラウド
 
 ## Architecture
 
+### 全体アーキテクチャ
+
 ```mermaid
 graph TB
-    subgraph "Edge Device (Docker Container)"
-        Camera[USB Camera]
-        GG[IoT Greengrass Core on Docker]
+    subgraph "Host (macOS)"
+        MacCamera[Mac Camera]
+        FFmpegHost["ffmpeg (avfoundation → RTSP)"]
+    end
+
+    subgraph "Edge Device (Docker)"
+        GG[IoT Greengrass Core]
         LocalLambda[Local Lambda Function]
         LocalStorage[Local Video Storage]
         TVControl[TV Control Module]
         IoTCorePub[IoT Core Publish]
+        MediaMTX["MediaMTX (RTSP Server)"]
+        FrameCapture["frame-capture (ffmpeg + Node.js)"]
     end
-    
+
     subgraph "AWS Cloud"
-        KVS[Kinesis Video Streams]
-        Rekognition[Amazon Rekognition]
-        Bedrock[Amazon Bedrock Claude]
-        ProcessingLambda[Video Processing Lambda]
-        S3Video[S3 Video Storage]
-        DynamoDB[DynamoDB State Management]
-        CloudWatch[CloudWatch Logs/Metrics]
-        Grafana[Managed Grafana]
-        QuickSight[QuickSight Analytics]
+        subgraph "映像パイプライン"
+            S3Live["S3 (live-frames/latest.jpg)"]
+            FrameLambda["Lambda (getLatestFrame)"]
+        end
+        subgraph "認識・分析パイプライン"
+            Rekognition[Amazon Rekognition]
+            Bedrock[Amazon Bedrock Claude]
+            ProcessingLambda[Video Processing Lambda]
+        end
+        subgraph "データ・API"
+            S3Video["S3 (daily/ 映像保存)"]
+            DynamoDB[DynamoDB Tables]
+            APIGateway[API Gateway]
+        end
+        subgraph "監視"
+            CloudWatch[CloudWatch Logs/Metrics]
+            SNS[SNS Alerts]
+        end
     end
-    
+
     subgraph "Web Management"
-        S3Web[S3 Static Hosting]
         CloudFront[CloudFront CDN]
-        VueApp[Vue.js SPA]
+        S3Web[S3 Static Hosting]
+        VueApp["Vue.js SPA (LiveVideo.vue)"]
     end
-    
-    Camera --> GG
+
+    MacCamera --> FFmpegHost
+    FFmpegHost -->|"RTSP (tcp)"| MediaMTX
+    MediaMTX -->|RTSP| FrameCapture
+    FrameCapture -->|"PutObject"| S3Live
+
     GG --> LocalLambda
     LocalLambda --> LocalStorage
     LocalLambda --> TVControl
     LocalLambda --> IoTCorePub
-    IoTCorePub --> KVS
-    
-    KVS --> ProcessingLambda
+    IoTCorePub --> ProcessingLambda
+
     ProcessingLambda --> Rekognition
     ProcessingLambda --> Bedrock
     ProcessingLambda --> S3Video
     ProcessingLambda --> DynamoDB
-    
+
+    S3Live --> FrameLambda
+    FrameLambda -->|"presigned URL"| APIGateway
+    DynamoDB --> APIGateway
     DynamoDB --> CloudWatch
-    CloudWatch --> Grafana
-    CloudWatch --> QuickSight
-    
+    CloudWatch --> SNS
+
     S3Web --> CloudFront
     CloudFront --> VueApp
-    VueApp --> DynamoDB
+    VueApp -->|"GET /video/latest-frame"| APIGateway
+```
+
+### ライブ映像フロー（現在の実装）
+
+Mac ではカメラデバイスを Docker に直接パススルーできないため、ffmpeg + MediaMTX (RTSP) 経由でフレームをキャプチャし、S3 + presigned URL で管理画面に配信する。リアルタイムストリーミングではなく、数秒間隔の静止画フレーム更新方式。
+
+```
+ライブ映像の動作フロー
+=====================
+
+[Host macOS]                   [Docker]                        [AWS Cloud]              [Browser]
+     |                              |                               |                       |
+     | 1. start-camera.sh           |                               |                       |
+     |    ffmpeg avfoundation       |                               |                       |
+     |------ RTSP (tcp) ---------->|                               |                       |
+     |                     MediaMTX (port 8554)                     |                       |
+     |                              |                               |                       |
+     |                     frame-capture                            |                       |
+     |                      2. ffmpeg -frames:v 1                   |                       |
+     |                         (RTSP → JPEG)                        |                       |
+     |                              |                               |                       |
+     |                              |--- 3. S3 PutObject ---------->|                       |
+     |                              |    live-frames/latest.jpg     |                       |
+     |                              |         (3秒ごと繰り返し)       |                       |
+     |                              |                               |                       |
+     |                              |                               |    4. GET /video/     |
+     |                              |                               |<--- latest-frame -----|
+     |                              |                               |                       |
+     |                              |                      Lambda: getLatestFrame            |
+     |                              |                      S3 presigned URL生成 (60秒有効)    |
+     |                              |                               |                       |
+     |                              |                               |--- 5. {url: "..."} -->|
+     |                              |                               |                       |
+     |                              |                               |    6. GET presigned   |
+     |                              |                               |<--- URL (S3直接) -----|
+     |                              |                               |                       |
+     |                              |                               |--- 7. JPEG 画像 ----->|
+     |                              |                               |                       |
+     |                              |                               |    8. <img> 表示      |
+     |                              |                               |    (liveVideoUpdate   |
+     |                              |                               |     Interval秒で      |
+     |                              |                               |     4-8を繰り返し)     |
+```
+
+### S3 ストレージ構造
+
+```
+noeatstop-videos-{stage}-{account}/
+├── live-frames/                   ← ライブ映像フレーム (1日で自動削除)
+│   └── latest.jpg                 ← 最新フレーム (frame-capture が上書き更新)
+└── daily/                         ← 食事セッション映像 (1日で自動削除)
+    └── YYYY-MM-DD/
+        └── session-{sessionId}/
+            ├── raw-video.mp4
+            ├── analysis-frames/
+            └── metadata.json
 ```
 
 ## Components and Interfaces
@@ -67,11 +145,15 @@ graph TB
 ### 1. Edge Device Components
 
 #### Camera Module
-- **責任**: USB Webカメラからの映像取得
-- **技術**: OpenCV, V4L2（Docker内からデバイスマウント経由）
-- **仕様**: 1080P/30frame対応USBカメラ
-- **出力**: デフォルト640x360/30fps H.264ストリーム（管理画面で設定変更可能）
-- **インターフェース**: Docker コンテナ内の `/dev/video0` デバイスマウント経由
+- **責任**: Mac カメラからの映像取得とクラウドへのフレーム配信
+- **技術**: ffmpeg (avfoundation) + MediaMTX (RTSP) + frame-capture (Node.js)
+- **仕様**: Mac 内蔵カメラ（640x480/30fps）
+- **配信方式**: RTSP → JPEG フレームキャプチャ → S3 アップロード（`CAPTURE_INTERVAL` 秒ごと）
+- **構成**:
+  - `start-camera.sh` (ホスト): ffmpeg で Mac カメラ → MediaMTX へ RTSP 配信
+  - `mediamtx` (Docker): RTSP サーバー（TCP、ポート 8554）
+  - `frame-capture` (Docker): RTSP から1フレーム取得 → S3 `live-frames/latest.jpg` にアップロード
+- **macOS 制約**: Docker on Mac ではカメラデバイス (`/dev/video0`) を直接パススルーできないため、ホスト側 ffmpeg → RTSP 経由で Docker に映像を渡す
 - **エラーハンドリング**: カメラ故障時は処理停止、TV制御も実行しない
 
 #### IoT Greengrass Core (Docker)
@@ -228,17 +310,24 @@ graph TB
 
 #### S3 Storage Structure
 ```
-no-eat-to-stop-videos/
-├── daily/
-│   └── YYYY-MM-DD/
-│       └── session-{sessionId}/
-│           ├── raw-video.mp4
-│           ├── analysis-frames/
-│           └── metadata.json
-└── web-app/
-    ├── index.html
-    ├── assets/
-    └── config.json
+noeatstop-videos-{stage}-{account}/       ← 映像用バケット
+├── live-frames/                          ← ライブ映像 (lifecycle: 1日で削除)
+│   └── latest.jpg                        ← frame-capture が上書き更新
+└── daily/                                ← セッション映像 (lifecycle: 1日で削除)
+    └── YYYY-MM-DD/
+        └── session-{sessionId}/
+            ├── raw-video.mp4
+            ├── analysis-frames/
+            └── metadata.json
+
+noeatstop-webapp-{stage}-{account}/       ← フロントエンド用バケット
+├── index.html
+├── vite.svg
+└── assets/
+    ├── index-*.js
+    ├── index-*.css
+    ├── LiveVideo-*.js
+    └── ...
 ```
 
 ### 4. Web Management Interface
@@ -262,7 +351,7 @@ no-eat-to-stop-videos/
 ```
 src/
 ├── components/
-│   ├── LiveVideo.vue          # リアルタイム映像表示（3秒間隔更新、設定変更可能）
+│   ├── LiveVideo.vue          # ライブ映像表示（presigned URL で S3 フレーム取得、定期更新）
 │   ├── MealHistory.vue        # 食事履歴・統計（咀嚼時間、TV制御回数）
 │   ├── SystemSettings.vue     # システム設定（全パラメータ設定変更）
 │   ├── Dashboard.vue          # ダッシュボード

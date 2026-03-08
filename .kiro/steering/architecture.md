@@ -25,48 +25,61 @@
 このプロジェクトは**サーバーレスアーキテクチャ**を採用:
 
 ```
-┌─────────────┐
-│   Edge      │  Raspberry Pi / macOS
-│   Device    │  - Camera capture
-│             │  - Local processing (Greengrass)
-└──────┬──────┘
-       │ KVS Stream
-       ↓
-┌─────────────────────────────────────────┐
-│           AWS Cloud                      │
-│                                          │
-│  ┌──────────┐    ┌──────────┐          │
-│  │ Kinesis  │───→│  Lambda  │          │
-│  │  Video   │    │  Video   │          │
-│  │ Streams  │    │Processor │          │
-│  └──────────┘    └────┬─────┘          │
-│                       │                 │
-│                       ↓                 │
-│  ┌──────────┐    ┌──────────┐          │
-│  │ Bedrock  │←───│ DynamoDB │          │
-│  │ (Claude) │    │  Tables  │          │
-│  └──────────┘    └────┬─────┘          │
-│                       │                 │
-│                       ↓                 │
-│  ┌──────────┐    ┌──────────┐          │
-│  │    S3    │    │   API    │          │
-│  │  Bucket  │    │ Gateway  │          │
-│  └──────────┘    └────┬─────┘          │
-│                       │                 │
-│                       ↓                 │
-│  ┌──────────────────────────┐          │
-│  │   CloudFront + S3        │          │
-│  │   (Vue.js Frontend)      │          │
-│  └──────────────────────────┘          │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Edge (Host macOS + Docker)                              │
+│                                                          │
+│  ┌────────────┐    ┌────────────┐    ┌──────────────┐  │
+│  │ Mac Camera │───→│  ffmpeg    │───→│  MediaMTX    │  │
+│  │            │    │(avfoundat.)│RTSP│ (Docker:8554)│  │
+│  └────────────┘    └────────────┘    └──────┬───────┘  │
+│                                             │ RTSP     │
+│  ┌────────────┐                    ┌────────┴───────┐  │
+│  │ Greengrass │                    │ frame-capture  │  │
+│  │   Core     │                    │ (Docker)       │  │
+│  │            │                    │ ffmpeg→JPEG→S3 │  │
+│  └──────┬─────┘                    └────────┬───────┘  │
+│         │ IoT Core                          │ S3       │
+└─────────┼───────────────────────────────────┼──────────┘
+          │                                   │
+          ↓                                   ↓
+┌─────────────────────────────────────────────────────────┐
+│           AWS Cloud                                      │
+│                                                          │
+│  ┌──────────────┐    ┌──────────────────────────┐      │
+│  │     S3       │    │ Lambda                    │      │
+│  │ live-frames/ │───→│ getLatestFrame            │      │
+│  │ latest.jpg   │    │ (presigned URL 生成)       │      │
+│  └──────────────┘    └────────────┬─────────────┘      │
+│                                   │                      │
+│  ┌──────────┐    ┌──────────┐    ↓                     │
+│  │ Bedrock  │←───│ Lambda   │  ┌──────────┐            │
+│  │ (Claude) │    │ Video    │  │   API    │            │
+│  └──────────┘    │Processor │  │ Gateway  │            │
+│                  └────┬─────┘  └────┬─────┘            │
+│  ┌──────────┐         │             │                    │
+│  │Rekognit. │←────────┘             │                    │
+│  └──────────┘                       │                    │
+│                                     │                    │
+│  ┌──────────┐    ┌──────────┐      │                    │
+│  │ DynamoDB │←───│    S3    │      │                    │
+│  │  Tables  │    │  daily/  │      │                    │
+│  └────┬─────┘    └──────────┘      │                    │
+│       │                             │                    │
+│       ↓                             ↓                    │
+│  ┌──────────────────────────────────────┐               │
+│  │   CloudFront + S3                     │               │
+│  │   Vue.js SPA (LiveVideo.vue)          │               │
+│  │   <img :src="presignedUrl">           │               │
+│  └──────────────────────────────────────┘               │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Components
 
-1. **Edge Layer**: IoT Greengrass（ローカル処理）
-2. **Ingestion Layer**: Kinesis Video Streams（動画ストリーミング）
+1. **Edge Layer**: Host ffmpeg + Docker (MediaMTX, frame-capture, Greengrass)
+2. **Live Video Pipeline**: frame-capture → S3 → Lambda (presigned URL) → フロントエンド
 3. **Processing Layer**: Lambda（ビジネスロジック）
-4. **AI Layer**: Amazon Bedrock（画像分析）
+4. **AI Layer**: Amazon Bedrock / Rekognition（画像分析）
 5. **Storage Layer**: DynamoDB + S3（データ永続化）
 6. **API Layer**: API Gateway（RESTful API）
 7. **Presentation Layer**: CloudFront + S3（Vue.js SPA）
