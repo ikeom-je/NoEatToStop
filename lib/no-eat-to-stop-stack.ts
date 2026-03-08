@@ -46,6 +46,11 @@ export class NoEatToStopStack extends cdk.Stack {
           prefix: 'daily/',
           expiration: cdk.Duration.days(1),
         },
+        {
+          id: 'DeleteLiveFrames',
+          prefix: 'live-frames/',
+          expiration: cdk.Duration.days(1),
+        },
       ],
     });
 
@@ -120,6 +125,7 @@ export class NoEatToStopStack extends cdk.Stack {
       ],
       resources: [
         `${this.videoBucket.bucketArn}/daily/*`,
+        `${this.videoBucket.bucketArn}/live-frames/*`,
       ],
     }));
 
@@ -286,6 +292,19 @@ export class NoEatToStopStack extends cdk.Stack {
       memorySize: 256,
     });
 
+    const getLatestFrameFn = new lambda.Function(this, 'GetLatestFrameHandler', {
+      functionName: `noeatstop-get-latest-frame-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getLatestFrame',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
     // API リソース定義
     const mealSessionResource = this.api.root.addResource('meal-session');
     const mealSessionIdResource = mealSessionResource.addResource('{sessionId}');
@@ -310,6 +329,10 @@ export class NoEatToStopStack extends cdk.Stack {
 
     settingKeyResource.addMethod('GET', new apigateway.LambdaIntegration(getSettingFn));
     settingKeyResource.addMethod('PUT', new apigateway.LambdaIntegration(updateSettingFn));
+
+    const videoResource = this.api.root.addResource('video');
+    const latestFrameResource = videoResource.addResource('latest-frame');
+    latestFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestFrameFn));
 
     // ========================================
     // CloudFront Distribution

@@ -1,6 +1,8 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MealSessionRepository } from '../repositories/meal-session-repository';
 import { EatingStateRepository } from '../repositories/eating-state-repository';
 import { SystemSettingsRepository } from '../repositories/system-settings-repository';
@@ -8,6 +10,7 @@ import { MealStateManager } from '../services/meal-state-manager';
 
 const ddbClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(ddbClient);
+const s3Client = new S3Client({});
 
 const sessionRepo = new MealSessionRepository(docClient, process.env.MEAL_SESSIONS_TABLE!);
 const stateRepo = new EatingStateRepository(docClient, process.env.EATING_STATES_TABLE!);
@@ -108,6 +111,23 @@ export async function updateSetting(event: APIGatewayProxyEvent): Promise<APIGat
 
     await settingsRepo.putSetting(settingKey, String(body.settingValue));
     return response(200, { settingKey, settingValue: body.settingValue });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+export async function getLatestFrame(): Promise<APIGatewayProxyResult> {
+  try {
+    const bucket = process.env.VIDEO_BUCKET;
+    if (!bucket) return response(500, { error: 'VIDEO_BUCKET not configured' });
+
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: 'live-frames/latest.jpg',
+    });
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 60 });
+
+    return response(200, { url });
   } catch (err) {
     return response(500, { error: (err as Error).message });
   }
