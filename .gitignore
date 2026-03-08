@@ -4,15 +4,22 @@
 # MCP server configuration (contains local environment settings)
 .mcp.json
 
-# Environment-specific files
+# Environment-specific files (実際の値を含む .env は全て除外、.example は許可)
+.env
 .env.local
 .env.credentials
 .env.*.local
+.env.production
+.env.staging
+edge/.env
 
 # Credentials and secrets
 *.pem
 *.key
 credentials.json
+**/credentials/
+**/certs/
+**/secrets/
 
 # Working directory (temporary files and intermediate data)
 working/
