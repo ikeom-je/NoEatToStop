@@ -22,6 +22,34 @@ services:
     networks:
       - noeatstop-edge
 
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: noeatstop-mediamtx
+    ports:
+      - "8554:8554"
+    environment:
+      - MTX_PROTOCOLS=tcp
+    restart: unless-stopped
+    networks:
+      - noeatstop-edge
+
+  frame-capture:
+    build: ./frame-capture
+    container_name: noeatstop-frame-capture
+    environment:
+      - RTSP_URL=rtsp://mediamtx:8554/camera
+      - S3_BUCKET=${VIDEO_BUCKET}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-3}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+    depends_on:
+      - mediamtx
+    restart: unless-stopped
+    networks:
+      - noeatstop-edge
+
 networks:
   noeatstop-edge:
     driver: bridge
