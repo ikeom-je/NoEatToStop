@@ -1,9 +1,13 @@
 # Edge — ライブ映像キャプチャ
 
-Mac のカメラ映像を Docker 経由でキャプチャし、S3 経由で管理画面に配信する。
+カメラ映像を Docker 経由でキャプチャし、S3 経由で管理画面に配信する。
 リアルタイムストリーミングではなく、数秒間隔の静止画フレーム更新方式。
 
+Mac 開発環境と Raspberry Pi 本番環境の両方に対応。
+
 ## アーキテクチャ
+
+### Mac 開発環境
 
 ```
 Mac Camera
@@ -17,17 +21,37 @@ S3 (live-frames/latest.jpg)
 管理画面 LiveVideo.vue (<img> タグで表示、定期リフレッシュ)
 ```
 
-| コンポーネント | 実行場所 | 役割 |
-|---|---|---|
-| `start-camera.sh` | ホスト (Mac) | Mac カメラ → RTSP 配信 |
-| `mediamtx` | Docker | RTSP サーバー (TCP) |
-| `frame-capture` | Docker | RTSP → JPEG → S3 アップロード |
+### Raspberry Pi 本番環境
+
+```
+USB Camera (/dev/video0)
+  ↓ v4l2 + mjpeg (ホスト側 ffmpeg)
+MediaMTX (Docker RTSP サーバー) ← rtsp://localhost:8554/camera
+  ↓ RTSP
+frame-capture (Docker)
+  ↓ ffmpeg で1フレーム取得 → S3 PutObject
+S3 (live-frames/latest.jpg)
+  ↓
+Greengrass Core (Docker) ← AWS IoT Core (MQTT)
+  ↓ Lambda (presigned URL 生成)
+管理画面 LiveVideo.vue
+```
+
+| コンポーネント | 実行場所 | Mac | RPi |
+|---|---|---|---|
+| `start-camera.sh` | ホスト (Mac) | Mac カメラ → RTSP | ― |
+| `start-camera-rpi.sh` | ホスト (RPi) | ― | USB カメラ → RTSP |
+| `mediamtx` | Docker | RTSP サーバー | RTSP サーバー |
+| `frame-capture` | Docker | RTSP → S3 | RTSP → S3 |
+| `greengrass-core` | Docker | ― | IoT Greengrass V2 |
 
 ---
 
 ## インストール
 
 ### 前提条件
+
+#### Mac 開発環境
 
 | ツール | インストール方法 |
 |---|---|
@@ -36,6 +60,31 @@ S3 (live-frames/latest.jpg)
 | ffmpeg | `brew install ffmpeg` |
 | AWS CLI v2 | `brew install awscli` |
 | Node.js 20+ | `brew install node@20` |
+
+#### Raspberry Pi 本番環境
+
+| ツール | インストール方法 |
+|---|---|
+| Raspberry Pi OS (64-bit) | aarch64 必須。Raspberry Pi Imager で書き込み |
+| Docker Engine | 下記「RPi Docker インストール」参照 |
+| Docker Compose V2 | Docker Engine に同梱 |
+| ffmpeg | `sudo apt install -y ffmpeg` |
+| AWS CLI v2 | `sudo apt install -y awscli` または pip 経由 |
+| USB カメラ | `/dev/video0` として認識されること |
+
+**RPi Docker インストール:**
+
+```bash
+# Docker 公式インストールスクリプト
+curl -fsSL https://get.docker.com | sh
+
+# pi ユーザーを docker グループに追加（再ログイン必要）
+sudo usermod -aG docker pi
+
+# 動作確認
+docker --version
+docker compose version
+```
 
 ### 1. AWS クラウドリソースのデプロイ
 
@@ -107,14 +156,16 @@ aws s3 sync dist/ s3://noeatstop-webapp-dev-XXXXXXXXXXXX/ --delete
 
 **起動順序が重要**: MediaMTX → カメラ配信 → frame-capture の順に接続される。
 
-### Step 1: Docker サービスを起動
+### Mac 開発環境
+
+#### Step 1: Docker サービスを起動
 
 ```bash
 cd edge
 docker compose up mediamtx frame-capture -d --build
 ```
 
-### Step 2: Mac カメラ配信を開始
+#### Step 2: Mac カメラ配信を開始
 
 別のターミナルで実行（フォアグラウンドで動作するため専用ターミナルが必要）:
 
@@ -131,7 +182,7 @@ Stream #0:0: Video: h264, yuv422p, 640x480, 30 fps
 frame=  125 fps= 25 q=15.0 ...
 ```
 
-### Step 3: frame-capture の接続確認
+#### Step 3: frame-capture の接続確認
 
 カメラ配信開始後、frame-capture コンテナが RTSP ストリームに接続するまで数秒かかる。
 コンテナがカメラ起動前に起動していた場合は再起動する:
@@ -139,6 +190,116 @@ frame=  125 fps= 25 q=15.0 ...
 ```bash
 cd edge
 docker compose restart frame-capture
+```
+
+### Raspberry Pi 本番環境
+
+#### Step 1: AWS 認証情報の設定
+
+Greengrass Core は `~/.aws/credentials` をコンテナにマウントして使用する。
+AWS CLI の default プロファイルが設定済みであること:
+
+```bash
+aws sts get-caller-identity
+# アカウント ID とユーザー情報が表示されれば OK
+```
+
+#### Step 2: edge/.env の設定
+
+```bash
+cd edge
+cp .env.example .env
+```
+
+`edge/.env` を編集:
+
+```bash
+AWS_REGION=ap-northeast-1
+THING_NAME=noeatstop-edge-device
+THING_GROUP_NAME=noeatstop-devices-dev
+
+# 初回プロビジョニング時は true（2回目以降は false に変更）
+PROVISION=true
+
+TES_ROLE_NAME=GreengrassV2TokenExchangeRole
+TES_ROLE_ALIAS_NAME=GreengrassV2TokenExchangeRoleAlias
+
+VIDEO_BUCKET=noeatstop-videos-dev-XXXXXXXXXXXX
+CAPTURE_INTERVAL=3
+
+# frame-capture 用 AWS 認証情報
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+#### Step 3: Greengrass Core の起動（初回プロビジョニング）
+
+```bash
+cd edge
+docker compose up greengrass-core -d --build
+```
+
+初回起動時、Greengrass は以下を自動で行う:
+
+- IoT Thing の証明書・秘密鍵の作成
+- IoT Policy のアタッチ
+- Token Exchange Role / Role Alias の作成
+- AWS IoT Core への MQTT 接続
+
+ログでプロビジョニング完了を確認:
+
+```bash
+docker logs noeatstop-gg-core --tail 20
+# "Launched Nucleus successfully." が表示されれば成功
+```
+
+**初回プロビジョニング後**: `edge/.env` の `PROVISION=false` に変更する。
+以降の再起動では既存の証明書・設定を再利用する。
+
+#### Step 4: MediaMTX + frame-capture の起動
+
+```bash
+docker compose up mediamtx frame-capture -d --build
+```
+
+#### Step 5: USB カメラ配信を開始
+
+USB カメラが接続されていることを確認:
+
+```bash
+ls /dev/video*
+# /dev/video0 が存在すること
+
+# カメラの対応フォーマット確認（任意）
+v4l2-ctl --list-formats-ext -d /dev/video0
+```
+
+別のターミナルで配信を開始:
+
+```bash
+./edge/start-camera-rpi.sh
+```
+
+環境変数でカスタマイズ可能:
+
+```bash
+CAMERA_DEVICE=/dev/video0 VIDEO_SIZE=640x480 FRAMERATE=30 ./edge/start-camera-rpi.sh
+```
+
+#### Step 6: E2E テスト
+
+すべてのサービスが起動した状態で実行:
+
+```bash
+./edge/e2e-test.sh
+```
+
+全 6 テストが PASS すれば正常:
+
+```
+=== テスト結果 ===
+PASSED: 6 / FAILED: 0
+すべてのテストに合格しました！
 ```
 
 ---
@@ -191,6 +352,8 @@ curl -s https://<API_GATEWAY_URL>/prod/video/latest-frame | python3 -m json.tool
 
 ## 停止
 
+### Mac
+
 ```bash
 # 1. カメラ配信を停止（start-camera.sh のターミナルで Ctrl+C）
 
@@ -199,34 +362,67 @@ cd edge
 docker compose down
 ```
 
+### Raspberry Pi
+
+```bash
+# 1. カメラ配信を停止（start-camera-rpi.sh のターミナルで Ctrl+C）
+
+# 2. Docker サービスを停止（Greengrass 含む全コンテナ）
+cd edge
+docker compose down
+```
+
+> **注意**: Greengrass の状態データは `/greengrass/v2` ボリュームに保存される。
+> `docker compose down -v` でボリュームを削除すると証明書・設定が失われ、再プロビジョニングが必要になる。
+
 ---
 
 ## 設定
 
 ### Edge 環境変数 (`edge/.env`)
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `VIDEO_BUCKET` | ― (必須) | S3 バケット名。CDK 出力の `VideoBucketName` |
-| `AWS_REGION` | `ap-northeast-1` | AWS リージョン |
-| `CAPTURE_INTERVAL` | `3` | フレームキャプチャ間隔（秒）。実際の更新間隔はキャプチャ処理時間を含むため、設定値より数秒長くなる |
-| `AWS_ACCESS_KEY_ID` | ― (必須) | AWS 認証情報 |
-| `AWS_SECRET_ACCESS_KEY` | ― (必須) | AWS 認証情報 |
-| `AWS_SESSION_TOKEN` | ― | SSO/STS 使用時のみ |
+| 変数 | デフォルト | 説明 | Mac | RPi |
+|---|---|---|---|---|
+| `AWS_REGION` | `ap-northeast-1` | AWS リージョン | 必須 | 必須 |
+| `VIDEO_BUCKET` | ― | S3 バケット名。CDK 出力の `VideoBucketName` | 必須 | 必須 |
+| `CAPTURE_INTERVAL` | `3` | フレームキャプチャ間隔（秒） | 任意 | 任意 |
+| `AWS_ACCESS_KEY_ID` | ― | frame-capture 用 AWS 認証情報 | 必須 | 必須 |
+| `AWS_SECRET_ACCESS_KEY` | ― | frame-capture 用 AWS 認証情報 | 必須 | 必須 |
+| `AWS_SESSION_TOKEN` | ― | SSO/STS 使用時のみ | 任意 | 任意 |
+| `THING_NAME` | `noeatstop-edge-device` | IoT Thing 名 | ― | 必須 |
+| `THING_GROUP_NAME` | `noeatstop-devices-dev` | IoT Thing Group 名 | ― | 必須 |
+| `PROVISION` | `true` | Greengrass 自動プロビジョニング | ― | 初回のみ true |
+| `TES_ROLE_NAME` | `GreengrassV2TokenExchangeRole` | Token Exchange Role 名 | ― | 必須 |
+| `TES_ROLE_ALIAS_NAME` | `GreengrassV2TokenExchangeRoleAlias` | Role Alias 名 | ― | 必須 |
+| `THING_POLICY_NAME` | `noeatstop-device-policy-dev` | IoT Policy 名 | ― | 必須 |
 
-### カメラ設定 (`start-camera.sh` 実行時の環境変数)
+### カメラ設定
+
+#### Mac (`start-camera.sh`)
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `CAMERA_INDEX` | `0` | Mac カメラデバイスインデックス |
 
-カメラの対応解像度・フレームレートは以下で確認:
-
 ```bash
 ffmpeg -f avfoundation -list_devices true -i "" 2>&1
 ```
 
-`start-camera.sh` 内の `-video_size` と `-framerate` をカメラがサポートする値に変更可能。
+#### Raspberry Pi (`start-camera-rpi.sh`)
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `CAMERA_DEVICE` | `/dev/video0` | カメラデバイスパス |
+| `VIDEO_SIZE` | `640x480` | 解像度 |
+| `FRAMERATE` | `30` | フレームレート (fps) |
+
+```bash
+# 接続されたカメラデバイスの確認
+ls /dev/video*
+
+# 対応フォーマット・解像度の確認
+v4l2-ctl --list-formats-ext -d /dev/video0
+```
 
 ### 管理画面の更新間隔
 
@@ -288,3 +484,78 @@ lsof -i :8554
 1. ブラウザの開発者ツール → Network タブで `/video/latest-frame` リクエストを確認
 2. CORS エラーの場合は API Gateway の CORS 設定を確認
 3. CloudFront のキャッシュが古い場合は `Ctrl+Shift+R` でハードリロード
+
+---
+
+## トラブルシューティング（Raspberry Pi 固有）
+
+### Greengrass プロビジョニングが失敗する
+
+```bash
+docker logs noeatstop-gg-core 2>&1 | grep -i "error\|fail"
+```
+
+よくある原因:
+
+- **AWS 認証情報が見つからない**: `~/.aws/credentials` に default プロファイルが設定されているか確認
+- **IAM 権限不足**: Greengrass プロビジョニングには `iot:*`, `iam:*`, `greengrass:*`, `sts:*` 等の権限が必要。Admin 権限を推奨
+- **既存の Thing と証明書の競合**: AWS IoT Core コンソールで既存の証明書を確認し、不要なものを削除
+
+### Greengrass が UNHEALTHY になる
+
+```bash
+# AWS 側のステータス確認
+aws greengrassv2 get-core-device \
+  --core-device-thing-name noeatstop-edge-device \
+  --region ap-northeast-1
+
+# コンテナ内のログ確認
+docker exec noeatstop-gg-core tail -50 /greengrass/v2/logs/greengrass.log
+```
+
+- コンテナが停止していないか `docker ps` で確認
+- ネットワーク接続を確認（IoT Core への 8883 ポートのアウトバウンド通信が必要）
+
+### USB カメラが認識されない
+
+```bash
+# デバイスの存在確認
+ls -la /dev/video*
+
+# v4l2 ユーティリティで詳細確認
+sudo apt install -y v4l-utils
+v4l2-ctl --list-devices
+
+# カメラの対応フォーマット確認
+v4l2-ctl --list-formats-ext -d /dev/video0
+```
+
+- USB カメラが挿さっているか物理的に確認
+- `/dev/video0` がない場合は `dmesg | tail -20` でカーネルメッセージを確認
+- MJPEG 非対応のカメラの場合、`start-camera-rpi.sh` の `-input_format` を `yuyv422` に変更
+
+### Docker イメージのビルドが遅い / 失敗する
+
+RPi 3B はメモリ 1GB のため、Docker ビルドにメモリが不足する場合がある:
+
+```bash
+# スワップの確認と拡大
+free -h
+sudo dphys-swapfile swapoff
+sudo sed -i 's/CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
+sudo dphys-swapfile setup
+sudo dphys-swapfile swapon
+```
+
+### 2回目以降の起動で PROVISION=true のまま起動してしまった
+
+既にプロビジョニング済みの環境で `PROVISION=true` のまま起動すると、証明書が再作成される場合がある。
+`edge/.env` の `PROVISION=false` に変更して再起動:
+
+```bash
+# .env を編集
+sed -i 's/PROVISION=true/PROVISION=false/' edge/.env
+
+# コンテナ再起動
+docker compose restart greengrass-core
+```
