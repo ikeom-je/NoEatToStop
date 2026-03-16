@@ -21,6 +21,10 @@ credentials.json
 **/certs/
 **/secrets/
 
+# Greengrass runtime data (Docker volume mount target)
+/greengrass/
+edge/greengrass-v2/
+
 # Working directory (temporary files and intermediate data)
 working/
 

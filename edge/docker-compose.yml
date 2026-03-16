@@ -2,22 +2,28 @@ version: '3.8'
 
 services:
   greengrass-core:
-    image: amazon/aws-iot-greengrass:latest
+    init: true
+    build:
+      context: ./greengrass
+      dockerfile: Dockerfile
+    image: noeatstop/greengrass:latest
     container_name: noeatstop-gg-core
     privileged: true
     ports:
       - "8883:8883"
     volumes:
-      - ./greengrass-v2:/greengrass/v2
-      - ./certs:/greengrass/v2/certs
-      - ./config:/greengrass/v2/config
-      # USB カメラデバイスマウント（ホストに応じて変更）
-      # - /dev/video0:/dev/video0
+      - /greengrass/v2:/greengrass/v2
+      - ~/.aws:/root/.aws:ro
     environment:
       - AWS_REGION=${AWS_REGION:-ap-northeast-1}
-      - PROVISION=${PROVISION:-false}
+      - PROVISION=${PROVISION:-true}
       - THING_NAME=${THING_NAME:-noeatstop-edge-device}
       - THING_GROUP_NAME=${THING_GROUP_NAME:-noeatstop-devices-dev}
+      - TES_ROLE_NAME=${TES_ROLE_NAME:-GreengrassV2TokenExchangeRole}
+      - TES_ROLE_ALIAS_NAME=${TES_ROLE_ALIAS_NAME:-GreengrassV2TokenExchangeRoleAlias}
+      - COMPONENT_DEFAULT_USER=ggc_user:ggc_group
+      - THING_POLICY_NAME=${THING_POLICY_NAME:-noeatstop-device-policy-dev}
+      - DEPLOY_DEV_TOOLS=true
     restart: unless-stopped
     networks:
       - noeatstop-edge
