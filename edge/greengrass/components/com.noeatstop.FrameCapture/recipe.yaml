@@ -1,0 +1,31 @@
+---
+RecipeFormatVersion: "2020-01-25"
+ComponentName: com.noeatstop.FrameCapture
+ComponentVersion: "1.0.0"
+ComponentDescription: "RTSP ストリームからフレームをキャプチャし S3 にアップロードするコンポーネント"
+ComponentPublisher: NoEatToStop
+ComponentConfiguration:
+  DefaultConfiguration:
+    rtspUrl: "rtsp://noeatstop-mediamtx:8554/camera"
+    s3Bucket: ""
+    captureInterval: "3"
+    awsRegion: "ap-northeast-1"
+    s3Key: "live-frames/latest.jpg"
+Manifests:
+  - Platform:
+      os: linux
+    Lifecycle:
+      install: |-
+        cd {artifacts:path}
+        npm install --omit=dev
+      run: |-
+        cd {artifacts:path}
+        export RTSP_URL="{configuration:/rtspUrl}"
+        export S3_BUCKET="{configuration:/s3Bucket}"
+        export CAPTURE_INTERVAL="{configuration:/captureInterval}"
+        export AWS_REGION="{configuration:/awsRegion}"
+        export S3_KEY="{configuration:/s3Key}"
+        node capture.js
+    Artifacts:
+      - URI: "file:///opt/greengrass-components/com.noeatstop.FrameCapture/artifacts/"
+        Unarchive: NONE

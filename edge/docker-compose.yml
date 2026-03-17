@@ -1,5 +1,9 @@
 version: '3.8'
 
+# Plan B: Greengrass Core に FrameCapture コンポーネントを統合
+# RPi 本番: greengrass-core のみ（IP カメラ）/ greengrass-core + mediamtx（USB カメラ）
+# Mac 開発: mediamtx + frame-capture（Greengrass 不使用）
+
 services:
   greengrass-core:
     init: true
@@ -24,6 +28,10 @@ services:
       - COMPONENT_DEFAULT_USER=ggc_user:ggc_group
       - THING_POLICY_NAME=${THING_POLICY_NAME:-noeatstop-device-policy-dev}
       - DEPLOY_DEV_TOOLS=true
+      # FrameCapture コンポーネント用設定
+      - RTSP_URL=${RTSP_URL}
+      - VIDEO_BUCKET=${VIDEO_BUCKET}
+      - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-3}
     restart: unless-stopped
     networks:
       - noeatstop-edge
@@ -39,9 +47,12 @@ services:
     networks:
       - noeatstop-edge
 
-  frame-capture:
+  # Mac 開発環境用（Greengrass が動作しない Mac で frame-capture を単体実行）
+  frame-capture-dev:
     build: ./frame-capture
     container_name: noeatstop-frame-capture
+    profiles:
+      - dev
     environment:
       - RTSP_URL=${RTSP_URL}
       - S3_BUCKET=${VIDEO_BUCKET}

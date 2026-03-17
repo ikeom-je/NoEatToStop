@@ -99,7 +99,85 @@ fi
 echo "Making loader script executable..."
 chmod +x $GGC_ROOT_PATH/alts/current/distro/bin/loader
 
+# --- FrameCapture コンポーネントのローカルデプロイ準備 ---
+COMPONENTS_SRC=/opt/greengrass-components
+RECIPES_DIR=${GGC_ROOT_PATH}/local-recipes
+ARTIFACTS_DIR=${GGC_ROOT_PATH}/local-artifacts
+
+setup_local_components() {
+  echo "Setting up local Greengrass components..."
+
+  mkdir -p "${RECIPES_DIR}" "${ARTIFACTS_DIR}"
+
+  # FrameCapture コンポーネント
+  FRAME_CAPTURE_SRC="${COMPONENTS_SRC}/com.noeatstop.FrameCapture"
+  if [ -d "${FRAME_CAPTURE_SRC}" ]; then
+    # レシピをコピー
+    cp "${FRAME_CAPTURE_SRC}/recipe.yaml" "${RECIPES_DIR}/com.noeatstop.FrameCapture-1.0.0.yaml"
+
+    # アーティファクトをコピー
+    ARTIFACT_DST="${ARTIFACTS_DIR}/com.noeatstop.FrameCapture/1.0.0"
+    mkdir -p "${ARTIFACT_DST}"
+    cp -r "${FRAME_CAPTURE_SRC}/artifacts/"* "${ARTIFACT_DST}/"
+
+    # npm install (FrameCapture の依存関係)
+    if [ -f "${ARTIFACT_DST}/package.json" ]; then
+      echo "Installing FrameCapture dependencies..."
+      cd "${ARTIFACT_DST}" && npm install --omit=dev 2>&1 | tail -3
+      cd /
+    fi
+
+    echo "FrameCapture component prepared at ${ARTIFACT_DST}"
+  fi
+}
+
+# Greengrass 起動後にローカルデプロイを実行するバックグラウンドタスク
+deploy_local_components() {
+  GG_CLI="${GGC_ROOT_PATH}/bin/greengrass-cli"
+
+  # Greengrass CLI が使えるようになるまで待機
+  echo "Waiting for Greengrass to be ready for local deployment..."
+  for i in $(seq 1 60); do
+    if [ -f "${GG_CLI}" ] && "${GG_CLI}" --version >/dev/null 2>&1; then
+      break
+    fi
+    sleep 5
+  done
+
+  if [ ! -f "${GG_CLI}" ]; then
+    echo "WARNING: Greengrass CLI not found. Skipping local component deployment."
+    return
+  fi
+
+  # FrameCapture コンポーネントのデプロイ
+  if [ -f "${RECIPES_DIR}/com.noeatstop.FrameCapture-1.0.0.yaml" ]; then
+    echo "Deploying FrameCapture component locally..."
+
+    # コンポーネント設定を環境変数から構築
+    MERGE_CONFIG="{\"rtspUrl\":\"${RTSP_URL:-rtsp://noeatstop-mediamtx:8554/camera}\",\"s3Bucket\":\"${VIDEO_BUCKET:-}\",\"captureInterval\":\"${CAPTURE_INTERVAL:-3}\",\"awsRegion\":\"${AWS_REGION:-ap-northeast-1}\"}"
+
+    "${GG_CLI}" deployment create \
+      --recipeDir "${RECIPES_DIR}" \
+      --artifactDir "${ARTIFACTS_DIR}" \
+      --merge "com.noeatstop.FrameCapture=1.0.0" \
+      --update-config "com.noeatstop.FrameCapture:MERGE:${MERGE_CONFIG}" \
+      2>&1 || echo "WARNING: FrameCapture deployment failed. Check Greengrass logs."
+
+    echo "FrameCapture local deployment initiated."
+  fi
+}
+
+# コンポーネントの準備（npm install 等）
+setup_local_components
+
 echo "Starting Greengrass..."
 
-# Start greengrass kernel via the loader script and register container as a thing
-exec $GGC_ROOT_PATH/alts/current/distro/bin/loader
+# Greengrass をバックグラウンドで起動し、ローカルデプロイを実行後に待機
+$GGC_ROOT_PATH/alts/current/distro/bin/loader &
+GG_PID=$!
+
+# バックグラウンドでコンポーネントデプロイ
+deploy_local_components &
+
+# Greengrass プロセスを待機
+wait $GG_PID

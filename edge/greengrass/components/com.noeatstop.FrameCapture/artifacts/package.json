@@ -1,0 +1,12 @@
+{
+  "name": "noeatstop-frame-capture",
+  "version": "1.0.0",
+  "description": "Greengrass FrameCapture component - RTSP frame capture to S3",
+  "main": "capture.js",
+  "scripts": {
+    "start": "node capture.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.400.0"
+  }
+}
