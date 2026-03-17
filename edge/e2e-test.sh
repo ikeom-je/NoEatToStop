@@ -6,7 +6,7 @@ set -e
 
 REGION="${AWS_REGION:-ap-northeast-1}"
 THING_NAME="${THING_NAME:-noeatstop-edge-device}"
-VIDEO_BUCKET="${VIDEO_BUCKET:-noeatstop-videos-dev-429648176155}"
+VIDEO_BUCKET="${VIDEO_BUCKET:?VIDEO_BUCKET 環境変数を設定してください}"
 PASSED=0
 FAILED=0
 
@@ -62,16 +62,32 @@ else
   fail "S3 書き込み失敗"
 fi
 
-# 5. Greengrass 内部ログ確認
+# 5. Greengrass 内部ログ確認（ローテーションログも含む）
 echo "[5] Greengrass Nucleus ログ確認"
-if docker exec noeatstop-gg-core test -f /greengrass/v2/logs/greengrass.log; then
-  if docker exec noeatstop-gg-core grep -q "Successfully connected to AWS IoT Core" /greengrass/v2/logs/greengrass.log 2>/dev/null; then
+if docker exec noeatstop-gg-core test -d /greengrass/v2/logs; then
+  if docker exec noeatstop-gg-core grep -rq "Successfully connected to AWS IoT Core" /greengrass/v2/logs/ 2>/dev/null; then
     pass "AWS IoT Core 接続ログ確認"
   else
     fail "AWS IoT Core 接続ログが見つかりません"
   fi
 else
-  fail "Greengrass ログファイルが見つかりません"
+  fail "Greengrass ログディレクトリが見つかりません"
+fi
+
+# 6. frame-capture コンテナ稼働確認
+echo "[6] frame-capture コンテナ稼働確認"
+if docker ps --format '{{.Names}}' | grep -q noeatstop-frame-capture; then
+  pass "コンテナ noeatstop-frame-capture が稼働中"
+else
+  fail "コンテナ noeatstop-frame-capture が見つかりません"
+fi
+
+# 7. frame-capture → S3 アップロード確認
+echo "[7] frame-capture → S3 フレームアップロード確認"
+if aws s3 ls "s3://$VIDEO_BUCKET/live-frames/latest.jpg" --region "$REGION" 2>/dev/null | grep -q "latest.jpg"; then
+  pass "S3 に live-frames/latest.jpg が存在"
+else
+  fail "S3 に live-frames/latest.jpg が見つかりません"
 fi
 
 # 結果サマリー

@@ -70,8 +70,8 @@ ls -la greengrass/v2/certs/
 ✅ Loaded .env.local
 ✅ Colima is running
 ✅ Certificate files found
-✅ IoT Data Endpoint: ae9z1fp6r1mt4-ats.iot.us-east-1.amazonaws.com
-✅ IoT Credential Endpoint: c15pe3wkjngg53.credentials.iot.us-east-1.amazonaws.com
+✅ IoT Data Endpoint: <YOUR_IOT_DATA_ENDPOINT>-ats.iot.<REGION>.amazonaws.com
+✅ IoT Credential Endpoint: <YOUR_IOT_CREDENTIAL_ENDPOINT>.credentials.iot.<REGION>.amazonaws.com
 📝 Creating Greengrass configuration...
 ✅ Configuration file created
 🚀 Starting Greengrass Core container...
