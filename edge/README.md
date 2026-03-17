@@ -5,9 +5,37 @@
 
 Mac 開発環境と Raspberry Pi 本番環境の両方に対応。
 
+## RTSP 接続パターン
+
+映像取得には 2 つの接続パターンがある。`edge/.env` の `RTSP_URL` 設定で切り替わる。
+
+### パターン A: MediaMTX 経由（USB カメラ / Mac 内蔵カメラ）
+
+`RTSP_URL` **未設定**時のデフォルト。ホスト側 ffmpeg でカメラ映像を MediaMTX に配信し、frame-capture が MediaMTX から取得する。
+
+```
+カメラ → ffmpeg (ホスト) → MediaMTX (Docker, :8554) → frame-capture (Docker) → S3
+```
+
+- Mac: `start-camera.sh` (avfoundation)
+- RPi: `start-camera-rpi.sh` (v4l2 + mjpeg)
+
+### パターン B: 外部 IP カメラ直接接続
+
+`RTSP_URL` に外部カメラの RTSP アドレスを設定すると、frame-capture が直接 IP カメラに接続する。MediaMTX と start-camera スクリプトは不要。
+
+```
+IP カメラ (RTSP) → frame-capture (Docker) → S3
+```
+
+例: `RTSP_URL=rtsp://user:pass@192.168.0.213:554/stream2`
+
 ## アーキテクチャ
 
-### Mac 開発環境
+### Mac 開発環境（パターン A のみ）
+
+Greengrass Core は Mac 上では使用しない（IPC の macOS 制限のため）。
+映像パイプライン（frame-capture → S3 → 管理画面）の開発・動作確認が目的。
 
 ```
 Mac Camera
@@ -21,7 +49,25 @@ S3 (live-frames/latest.jpg)
 管理画面 LiveVideo.vue (<img> タグで表示、定期リフレッシュ)
 ```
 
-### Raspberry Pi 本番環境
+### Raspberry Pi 本番環境（パターン B: IP カメラ）
+
+frame-capture が IP カメラに直接 RTSP 接続。MediaMTX 不要。
+Greengrass Core は映像パイプラインとは独立して IoT Core (MQTT) 経由のクラウド連携を担う。
+
+```
+IP Camera (RTSP)
+  ↓ RTSP 直接接続（RTSP_URL で指定）
+frame-capture (Docker)
+  ↓ ffmpeg で1フレーム取得 → S3 PutObject
+S3 (live-frames/latest.jpg)
+  ↓ Lambda (presigned URL 生成)
+管理画面 LiveVideo.vue
+
+Greengrass Core (Docker) ←── MQTT ──→ AWS IoT Core
+  （Edge デバイス管理・状態監視。映像パイプラインとは独立）
+```
+
+### Raspberry Pi 本番環境（パターン A: USB カメラ）
 
 ```
 USB Camera (/dev/video0)
@@ -31,19 +77,22 @@ MediaMTX (Docker RTSP サーバー) ← rtsp://localhost:8554/camera
 frame-capture (Docker)
   ↓ ffmpeg で1フレーム取得 → S3 PutObject
 S3 (live-frames/latest.jpg)
-  ↓
-Greengrass Core (Docker) ← AWS IoT Core (MQTT)
   ↓ Lambda (presigned URL 生成)
 管理画面 LiveVideo.vue
+
+Greengrass Core (Docker) ←── MQTT ──→ AWS IoT Core
+  （Edge デバイス管理・状態監視。映像パイプラインとは独立）
 ```
 
-| コンポーネント | 実行場所 | Mac | RPi |
-|---|---|---|---|
-| `start-camera.sh` | ホスト (Mac) | Mac カメラ → RTSP | ― |
-| `start-camera-rpi.sh` | ホスト (RPi) | ― | USB カメラ → RTSP |
-| `mediamtx` | Docker | RTSP サーバー | RTSP サーバー |
-| `frame-capture` | Docker | RTSP → S3 | RTSP → S3 |
-| `greengrass-core` | Docker | ― | IoT Greengrass V2 |
+| コンポーネント | 実行場所 | Mac 開発 | RPi (USB カメラ) | RPi (IP カメラ) |
+|---|---|---|---|---|
+| `start-camera.sh` | ホスト (Mac) | Mac カメラ → RTSP | ― | ― |
+| `start-camera-rpi.sh` | ホスト (RPi) | ― | USB カメラ → RTSP | ― |
+| `mediamtx` | Docker | RTSP サーバー | RTSP サーバー | 不要 |
+| `frame-capture` | Docker | RTSP → S3 | RTSP → S3 | RTSP → S3 |
+| `greengrass-core` | Docker | **不使用** (※1) | IoT Greengrass V2 | IoT Greengrass V2 |
+
+> ※1: Greengrass IPC は macOS / Colima 上では Unix ドメインソケットの制限により動作しない。Mac では映像パイプライン（frame-capture → S3）の開発・動作確認のみ行う。
 
 ---
 
@@ -68,9 +117,9 @@ Greengrass Core (Docker) ← AWS IoT Core (MQTT)
 | Raspberry Pi OS (64-bit) | aarch64 必須。Raspberry Pi Imager で書き込み |
 | Docker Engine | 下記「RPi Docker インストール」参照 |
 | Docker Compose V2 | Docker Engine に同梱 |
-| ffmpeg | `sudo apt install -y ffmpeg` |
+| ffmpeg | `sudo apt install -y ffmpeg`（USB カメラ使用時のみ必須） |
 | AWS CLI v2 | `sudo apt install -y awscli` または pip 経由 |
-| USB カメラ | `/dev/video0` として認識されること |
+| USB カメラ or IP カメラ | USB: `/dev/video0` として認識されること / IP: RTSP 対応であること |
 
 **RPi Docker インストール:**
 
@@ -154,7 +203,8 @@ aws s3 sync dist/ s3://noeatstop-webapp-dev-XXXXXXXXXXXX/ --delete
 
 ## 起動手順
 
-**起動順序が重要**: MediaMTX → カメラ配信 → frame-capture の順に接続される。
+**起動順序が重要（パターン A のみ）**: MediaMTX → カメラ配信 → frame-capture の順に接続される。
+パターン B（IP カメラ直接）では frame-capture のみ起動すればよい。
 
 ### Mac 開発環境
 
@@ -217,6 +267,7 @@ cp .env.example .env
 AWS_REGION=ap-northeast-1
 THING_NAME=noeatstop-edge-device
 THING_GROUP_NAME=noeatstop-devices-dev
+THING_POLICY_NAME=noeatstop-device-policy-dev
 
 # 初回プロビジョニング時は true（2回目以降は false に変更）
 PROVISION=true
@@ -230,6 +281,9 @@ CAPTURE_INTERVAL=3
 # frame-capture 用 AWS 認証情報
 AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=...
+
+# 外部 IP カメラを使う場合（USB カメラの場合は未設定のまま）
+# RTSP_URL=rtsp://user:pass@192.168.x.x:554/stream
 ```
 
 #### Step 3: Greengrass Core の起動（初回プロビジョニング）
@@ -256,13 +310,21 @@ docker logs noeatstop-gg-core --tail 20
 **初回プロビジョニング後**: `edge/.env` の `PROVISION=false` に変更する。
 以降の再起動では既存の証明書・設定を再利用する。
 
-#### Step 4: MediaMTX + frame-capture の起動
+#### Step 4: 映像キャプチャの起動
+
+**パターン B（外部 IP カメラ）**: `RTSP_URL` を設定済みの場合
 
 ```bash
-docker compose up mediamtx frame-capture -d --build
+# frame-capture のみ起動（MediaMTX 不要）
+docker compose up frame-capture -d --build
 ```
 
-#### Step 5: USB カメラ配信を開始
+**パターン A（USB カメラ）**: `RTSP_URL` 未設定の場合
+
+```bash
+# MediaMTX + frame-capture を起動
+docker compose up mediamtx frame-capture -d --build
+```
 
 USB カメラが接続されていることを確認:
 
@@ -286,7 +348,7 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 CAMERA_DEVICE=/dev/video0 VIDEO_SIZE=640x480 FRAMERATE=30 ./edge/start-camera-rpi.sh
 ```
 
-#### Step 6: E2E テスト
+#### Step 5: E2E テスト
 
 すべてのサービスが起動した状態で実行:
 
@@ -294,11 +356,11 @@ CAMERA_DEVICE=/dev/video0 VIDEO_SIZE=640x480 FRAMERATE=30 ./edge/start-camera-rp
 ./edge/e2e-test.sh
 ```
 
-全 6 テストが PASS すれば正常:
+全 8 項目が PASS すれば正常（7 テストセクション、#4 に読み書き 2 サブ項目）:
 
 ```
 === テスト結果 ===
-PASSED: 6 / FAILED: 0
+PASSED: 8 / FAILED: 0
 すべてのテストに合格しました！
 ```
 
@@ -389,6 +451,7 @@ docker compose down
 | `AWS_ACCESS_KEY_ID` | ― | frame-capture 用 AWS 認証情報 | 必須 | 必須 |
 | `AWS_SECRET_ACCESS_KEY` | ― | frame-capture 用 AWS 認証情報 | 必須 | 必須 |
 | `AWS_SESSION_TOKEN` | ― | SSO/STS 使用時のみ | 任意 | 任意 |
+| `RTSP_URL` | `rtsp://mediamtx:8554/camera` | RTSP ソース URL。外部 IP カメラを直接指定する場合に設定。未設定時は MediaMTX 経由 | 任意 | 任意 |
 | `THING_NAME` | `noeatstop-edge-device` | IoT Thing 名 | ― | 必須 |
 | `THING_GROUP_NAME` | `noeatstop-devices-dev` | IoT Thing Group 名 | ― | 必須 |
 | `PROVISION` | `true` | Greengrass 自動プロビジョニング | ― | 初回のみ true |
