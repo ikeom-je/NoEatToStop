@@ -34,19 +34,19 @@
 
 ### Mac vs RPi の違い
 - **Mac 開発環境**: frame-capture → S3 パイプラインのみ。Greengrass Core は macOS 上で動作しない（IPC 制限）
-- **RPi 本番環境**: frame-capture + Greengrass Core（IoT Core MQTT 連携）のフルスタック
+- **RPi 本番環境**: Greengrass Core 単一コンテナ内で FrameCapture プロセスを統合実行 + IoT Core MQTT 連携
 
 ### RTSP 接続パターン
 - **パターン A（MediaMTX 経由）**: `RTSP_URL` 未設定時。ホスト側 ffmpeg でカメラ映像を MediaMTX に配信
   - Mac: `edge/start-camera.sh`（avfoundation）
   - RPi: `edge/start-camera-rpi.sh`（v4l2 + mjpeg）
-- **パターン B（IP カメラ直接）**: `RTSP_URL` 設定時。frame-capture が直接接続。MediaMTX・start-camera スクリプト不要
+- **パターン B（IP カメラ直接）**: `RTSP_URL` 設定時。FrameCapture が直接接続。MediaMTX・start-camera スクリプト不要
 
 ### 起動手順
-- **Mac 開発**: `docker compose up mediamtx frame-capture -d --build` → `./start-camera.sh`
-- **RPi 本番（IP カメラ）**: `docker compose up greengrass-core frame-capture -d --build`
-- **RPi 本番（USB カメラ）**: `docker compose up greengrass-core mediamtx frame-capture -d --build` → `./start-camera-rpi.sh`
-- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（8項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・frame-capture稼働・S3フレーム）
+- **Mac 開発**: `docker compose up mediamtx --profile dev frame-capture-dev -d --build` → `./start-camera.sh`
+- **RPi 本番（IP カメラ）**: `docker compose up greengrass-core -d --build`（コンテナ1つのみ）
+- **RPi 本番（USB カメラ）**: `docker compose up greengrass-core mediamtx -d --build` → `./start-camera-rpi.sh`
+- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（8項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム）
 
 ## 開発ルール
 
