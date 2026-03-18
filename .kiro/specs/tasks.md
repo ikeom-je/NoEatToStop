@@ -72,7 +72,7 @@
 
 - [ ] 5. Greengrass 統合 Edge 環境の構築（案 B: 単一コンテナ統合）
   - [ ] 5.1 Greengrass Docker イメージの拡張
-    - Greengrass Dockerfile に Node.js 24 + Python 3.11+ + ffmpeg を追加
+    - Greengrass Dockerfile に Node.js 22 + Python 3.9 + ffmpeg を追加
     - 不要パッケージの削除によるイメージサイズ最適化
     - イメージビルドと基本動作の確認
     - _Requirements: 2.1, 5.4_
@@ -103,7 +103,7 @@
     - _Requirements: 5.4_
 
   - [ ] 5.6 将来: ChewingAnalyzer コンポーネントの追加（Python）
-    - Python 3.11+ での映像分析コンポーネント
+    - Python 3.9+ での映像分析コンポーネント
     - FrameCapture との IPC 連携
     - IoT Core MQTT による状態通知
     - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_

@@ -24,27 +24,28 @@ frame-capture (Docker) ── ffmpeg で 1 フレーム取得 ──→ S3 (live
 
 ### Raspberry Pi 本番環境
 
-フレームキャプチャに加え、Greengrass Core が IoT Core (MQTT) でクラウドと双方向通信する。
+Greengrass Core 単一コンテナ内で FrameCapture プロセスを統合実行し、IoT Core (MQTT) でクラウドと双方向通信する。
 
 ```
 IP Camera (RTSP) または USB Camera
   ↓ RTSP（直接 or MediaMTX 経由）
-frame-capture (Docker) ── ffmpeg で 1 フレーム取得 ──→ S3 (live-frames/latest.jpg)
-                                                          ↓
-Greengrass Core (Docker) ←── MQTT ──→ AWS IoT Core    Lambda (presigned URL)
-                                                          ↓
+Greengrass Core (Docker)
+  ├── FrameCapture ── ffmpeg で 1 フレーム取得 ──→ S3 (live-frames/latest.jpg)
+  │                                                     ↓
+  └── IoT Core MQTT ←──→ AWS IoT Core           Lambda (presigned URL)
+                                                        ↓
                                               管理画面 (Vue.js / CloudFront)
 ```
 
-**用途**: 本番稼働。映像キャプチャ + IoT Greengrass による Edge-Cloud 連携
+**用途**: 本番稼働。映像キャプチャ + IoT Greengrass による Edge-Cloud 連携（単一コンテナ）
 
 ### Mac と RPi の主な違い
 
 | 項目 | Mac 開発環境 | Raspberry Pi 本番環境 |
 |------|-------------|---------------------|
 | **目的** | パイプライン開発・UI 動作確認 | 本番稼働 |
-| **Docker コンテナ** | mediamtx + frame-capture | greengrass-core + mediamtx + frame-capture |
-| **Greengrass Core** | 不使用 | IoT Core (MQTT) 経由でクラウド連携 |
+| **Docker コンテナ** | mediamtx + frame-capture-dev | greengrass-core（FrameCapture 統合） |
+| **Greengrass Core** | 不使用 | FrameCapture 統合 + IoT Core MQTT |
 | **カメラドライバ** | avfoundation (Mac 内蔵カメラ) | v4l2 (USB) または RTSP (IP カメラ) |
 | **RTSP 取得** | 常に MediaMTX 経由 | MediaMTX 経由 or IP カメラ直接接続 |
 | **Docker ランタイム** | Colima (または Docker Desktop) | Docker Engine |
@@ -60,7 +61,7 @@ Greengrass Core (Docker) ←── MQTT ──→ AWS IoT Core    Lambda (presig
 - **フロントエンド**: Vue.js v3 + Tailwind CSS
 - **データベース**: Amazon DynamoDB
 - **映像処理**: Amazon Kinesis Video Streams, Rekognition, Bedrock
-- **Edge**: AWS IoT Greengrass V2 (Docker)、frame-capture (Node.js + ffmpeg)
+- **Edge**: AWS IoT Greengrass V2 (Docker、Node.js 22 + ffmpeg 統合)
 - **Docker ランタイム**: Colima (Mac) / Docker Engine (RPi)
 
 ## 前提条件
@@ -102,17 +103,17 @@ cp edge/.env.example edge/.env     # Edge 環境変数（VIDEO_BUCKET, AWS 認�
 # 3-a. Mac 開発環境
 colima start --cpu 4 --memory 8
 cd edge
-docker compose up mediamtx frame-capture -d --build
+docker compose --profile dev up mediamtx frame-capture-dev -d --build
 ./start-camera.sh   # 別ターミナルで実行（Ctrl+C で停止）
 
-# 3-b. RPi 本番環境（IP カメラ）
+# 3-b. RPi 本番環境（IP カメラ）— コンテナ1つのみ
 cd edge
 # edge/.env に RTSP_URL=rtsp://user:pass@<IP>:<port>/stream を設定
-docker compose up greengrass-core frame-capture -d --build
+docker compose up greengrass-core -d --build
 
 # 3-c. RPi 本番環境（USB カメラ）
 cd edge
-docker compose up greengrass-core mediamtx frame-capture -d --build
+docker compose up greengrass-core mediamtx -d --build
 ./start-camera-rpi.sh   # 別ターミナルで実行（Ctrl+C で停止）
 ```
 
@@ -132,9 +133,9 @@ no-eat-to-stop-system/
 │   ├── services/          # Business logic services
 │   └── lambda/            # Lambda function implementations
 ├── edge/                  # Edge デバイス（RTSP + IoT Greengrass）
-│   ├── docker-compose.yml # greengrass-core / mediamtx / frame-capture
-│   ├── greengrass/        # Greengrass Core Docker ビルド
-│   ├── frame-capture/     # RTSP → S3 フレームキャプチャ
+│   ├── docker-compose.yml # greengrass-core / mediamtx
+│   ├── greengrass/        # Greengrass Core Docker ビルド（FrameCapture 統合）
+│   ├── frame-capture/     # Mac 開発用 frame-capture（profiles: dev）
 │   ├── start-camera.sh    # Mac カメラ → MediaMTX 配信
 │   ├── start-camera-rpi.sh# RPi USB カメラ → MediaMTX 配信
 │   ├── e2e-test.sh        # Edge E2E テスト
@@ -159,9 +160,9 @@ no-eat-to-stop-system/
 - **IAM Roles**: Least-privilege access for edge devices and Lambda functions
 
 ### Edge Layer (`edge/`)
-- **frame-capture**: Node.js + ffmpeg。RTSP ストリームから定期的にフレームを取得し S3 にアップロード
-- **MediaMTX**: RTSP リレーサーバー。USB カメラ / Mac カメラからの ffmpeg 配信を受け、frame-capture に中継
-- **Greengrass Core** (RPi のみ): AWS IoT Core と MQTT で双方向通信。Edge デバイス管理・状態監視
+- **Greengrass Core** (RPi): FrameCapture プロセスを統合した単一コンテナ。Node.js 22 + ffmpeg で RTSP → S3 フレームキャプチャ + IoT Core MQTT 通信
+- **MediaMTX**: RTSP リレーサーバー。USB カメラ / Mac カメラ使用時のみ必要
+- **frame-capture-dev** (Mac 開発のみ): Greengrass が動作しない Mac 用の独立コンテナ（`--profile dev`）
 - **AI Integration**: Amazon Bedrock (Claude) による咀嚼行動分析（クラウド側 Lambda で実行）
 
 ### Frontend Layer (Vue.js)
@@ -236,23 +237,20 @@ colima delete                      # 完全リセット
 ```bash
 cd edge
 
-# 全サービス起動
-docker compose up -d --build
+# RPi: Greengrass Core 起動（FrameCapture 統合）
+docker compose up greengrass-core -d --build
 
-# 全サービス停止
+# RPi: 全サービス停止
 docker compose down
 
-# Greengrass Core のログ確認
+# Greengrass Core のログ確認（FrameCapture ログも含む）
 docker logs -f noeatstop-gg-core
 
-# frame-capture のログ確認
-docker logs -f noeatstop-frame-capture
-
 # コンテナ内でコマンド実行
-docker exec -it noeatstop-gg-core bash
+docker exec -it noeatstop-gg-core sh
 
-# 個別サービスの再起動
-docker compose restart frame-capture
+# コンテナ再起動
+docker compose restart greengrass-core
 ```
 
 ### TypeScript Build
@@ -331,8 +329,8 @@ After deployment, the web application will be accessible via the CloudFront URL 
 
 ### Mac と RPi の開発スコープ
 
-- **Mac 開発環境**: frame-capture → S3 パイプラインの開発・UI 動作確認に使用。Greengrass Core / IoT Core は Mac 上では動作しない（IPC の macOS 制限のため）
-- **Raspberry Pi**: 本番環境。Greengrass Core + IoT Core + frame-capture のフルスタックが稼働
+- **Mac 開発環境**: frame-capture-dev コンテナで S3 パイプラインの開発・UI 動作確認。Greengrass Core は Mac 上では動作しない（IPC の macOS 制限のため）
+- **Raspberry Pi**: 本番環境。Greengrass Core 単一コンテナ内で FrameCapture + IoT Core MQTT のフルスタックが稼働
 - **Greengrass コンポーネントのテスト**: RPi 実機 または EC2 (Linux) で実施すること
 
 ## Error Handling

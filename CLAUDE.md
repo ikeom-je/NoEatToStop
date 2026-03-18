@@ -30,7 +30,7 @@
 
 - 詳細: `edge/README.md`
 - Edge 環境変数: `edge/.env`（Git管理外）、テンプレート: `edge/.env.example`
-- Docker Compose: `edge/docker-compose.yml`（greengrass-core / mediamtx / frame-capture）
+- Docker Compose: `edge/docker-compose.yml`（greengrass-core / mediamtx / frame-capture-dev）
 
 ### Mac vs RPi の違い
 - **Mac 開発環境**: frame-capture → S3 パイプラインのみ。Greengrass Core は macOS 上で動作しない（IPC 制限）

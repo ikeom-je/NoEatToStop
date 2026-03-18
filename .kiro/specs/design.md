@@ -84,7 +84,7 @@ graph TB
 RPi 3B のリソース制約に対応するため、Edge 処理を単一 Greengrass コンテナに統合する。
 
 ```
-[Greengrass Core コンテナ] (Debian + Java 11 + Node.js 24 + Python 3.11+ + ffmpeg)
+[Greengrass Core コンテナ] (Debian + Java 11 + Node.js 22 + Python 3.9 + ffmpeg)
   ├── Greengrass Nucleus（コア・ライフサイクル管理）
   ├── Token Exchange Service（TES: AWS 一時認証情報の自動取得）
   ├── コンポーネント: com.noeatstop.FrameCapture
@@ -161,7 +161,7 @@ noeatstop-videos-{stage}-{account}/
 #### IoT Greengrass Core (単一 Docker コンテナ)
 - **責任**: Edge 全機能の統合実行環境
 - **技術**: AWS IoT Greengrass V2（Docker コンテナ）
-- **ベースイメージ**: Debian bullseye-slim + Java 11 + Node.js 24 + Python 3.11+ + ffmpeg
+- **ベースイメージ**: Debian bullseye-slim + Java 11 + Node.js 22 + Python 3.9 + ffmpeg
 - **実行環境**: docker-compose で管理。RPi 3B のリソース制約に対応するため単一コンテナに統合
 - **機能**:
   - Greengrass カスタムコンポーネントの実行・ライフサイクル管理
@@ -173,7 +173,7 @@ noeatstop-videos-{stage}-{account}/
 
 #### Greengrass コンポーネント: com.noeatstop.FrameCapture
 - **責任**: RTSP ストリームからのフレームキャプチャと S3 アップロード
-- **技術**: Node.js 24 + ffmpeg（Greengrass コンテナ内で実行）
+- **技術**: Node.js 22 + ffmpeg（Greengrass コンテナ内で実行）
 - **認証**: TES 経由で S3 への一時認証情報を自動取得（.env の AWS_ACCESS_KEY_ID 不要）
 - **処理フロー**:
   1. RTSP ストリームに接続（IP カメラ直接 or MediaMTX 経由）
@@ -192,7 +192,7 @@ noeatstop-videos-{stage}-{account}/
 
 #### Greengrass コンポーネント: 将来追加予定（ChewingAnalyzer）
 - **責任**: エッジでの映像分析と咀嚼状態判定
-- **技術**: Python 3.11+ + 映像分析ライブラリ
+- **技術**: Python 3.9 + 映像分析ライブラリ
 - **設計方針**: FrameCapture と IPC で連携。フレーム取得通知を受けてローカル分析を実行
 - **処理内容**（将来実装）:
   - 顔検出・口の位置検出・咀嚼動作判定
