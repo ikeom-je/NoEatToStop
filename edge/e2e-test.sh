@@ -74,12 +74,12 @@ else
   fail "Greengrass ログディレクトリが見つかりません"
 fi
 
-# 6. frame-capture コンテナ稼働確認
-echo "[6] frame-capture コンテナ稼働確認"
-if docker ps --format '{{.Names}}' | grep -q noeatstop-frame-capture; then
-  pass "コンテナ noeatstop-frame-capture が稼働中"
+# 6. FrameCapture プロセス稼働確認（Greengrass コンテナ内）
+echo "[6] FrameCapture プロセス稼働確認"
+if docker exec noeatstop-gg-core sh -c 'cat /proc/*/cmdline 2>/dev/null | tr "\0" "\n" | grep -q "capture.js"'; then
+  pass "FrameCapture プロセスが Greengrass コンテナ内で稼働中"
 else
-  fail "コンテナ noeatstop-frame-capture が見つかりません"
+  fail "FrameCapture プロセスが見つかりません"
 fi
 
 # 7. frame-capture → S3 アップロード確認
