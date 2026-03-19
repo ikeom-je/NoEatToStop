@@ -84,7 +84,7 @@ graph TB
 RPi 3B のリソース制約に対応するため、Edge 処理を単一 Greengrass コンテナに統合する。
 
 ```
-[Greengrass Core コンテナ] (Debian + Java 11 + Node.js 22 + Python 3.9 + ffmpeg)
+[Greengrass Core コンテナ] (Debian + Java 17 + Node.js 22 + Python 3.11 + ffmpeg)
   ├── Greengrass Nucleus（コア・ライフサイクル管理）
   ├── Token Exchange Service（TES: AWS 一時認証情報の自動取得）
   ├── コンポーネント: com.noeatstop.FrameCapture
@@ -161,7 +161,7 @@ noeatstop-videos-{stage}-{account}/
 #### IoT Greengrass Core (単一 Docker コンテナ)
 - **責任**: Edge 全機能の統合実行環境
 - **技術**: AWS IoT Greengrass V2（Docker コンテナ）
-- **ベースイメージ**: Debian bullseye-slim + Java 11 + Node.js 22 + Python 3.9 + ffmpeg
+- **ベースイメージ**: Debian bookworm-slim + Java 17 + Node.js 22 + Python 3.11 + ffmpeg
 - **実行環境**: docker-compose で管理。RPi 3B のリソース制約に対応するため単一コンテナに統合
 - **機能**:
   - Greengrass カスタムコンポーネントの実行・ライフサイクル管理
@@ -192,7 +192,7 @@ noeatstop-videos-{stage}-{account}/
 
 #### Greengrass コンポーネント: 将来追加予定（ChewingAnalyzer）
 - **責任**: エッジでの映像分析と咀嚼状態判定
-- **技術**: Python 3.9 + 映像分析ライブラリ
+- **技術**: Python 3.11 + 映像分析ライブラリ
 - **設計方針**: FrameCapture と IPC で連携。フレーム取得通知を受けてローカル分析を実行
 - **処理内容**（将来実装）:
   - 顔検出・口の位置検出・咀嚼動作判定
@@ -239,7 +239,7 @@ noeatstop-videos-{stage}-{account}/
 
 #### Video Processing Lambda
 - **責任**: クラウド側での高精度映像解析
-- **技術**: Python 3.9, boto3
+- **技術**: Python 3.11, boto3
 - **処理フロー**:
   1. KVSからの映像セグメント取得
   2. フレーム抽出（1秒間隔）

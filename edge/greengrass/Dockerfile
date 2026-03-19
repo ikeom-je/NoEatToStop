@@ -1,7 +1,8 @@
-# Greengrass V2 + Node.js 22 + Python 3 + ffmpeg
+# Greengrass V2 + Node.js 22 + Python 3.11 + ffmpeg
 # Plan B: 単一コンテナ統合（RPi 3B 向け最小構成）
+# Bookworm: Python 3.11 標準、Java 17 標準
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG GREENGRASS_RELEASE_VERSION=latest
 ARG GREENGRASS_ZIP_FILE=greengrass-${GREENGRASS_RELEASE_VERSION}.zip
@@ -27,7 +28,7 @@ COPY "modify-sudoers.sh" /
 # 全依存を単一 RUN で install → cleanup してレイヤーサイズを最小化
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      openjdk-11-jre-headless \
+      openjdk-17-jre-headless \
       python3 \
       ffmpeg \
       curl \
