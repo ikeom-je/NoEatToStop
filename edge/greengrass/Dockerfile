@@ -1,15 +1,11 @@
-# Greengrass V2 Docker image for Raspberry Pi (aarch64 ARM v8.0)
-# Based on the official aws-greengrass-docker but using Debian for RPi compatibility
-# Original: https://github.com/aws-greengrass/aws-greengrass-docker
+# Greengrass V2 + Node.js 22 + Python 3 + ffmpeg
+# Plan B: 単一コンテナ統合（RPi 3B 向け最小構成）
 
 FROM debian:bullseye-slim
 
 ARG GREENGRASS_RELEASE_VERSION=latest
 ARG GREENGRASS_ZIP_FILE=greengrass-${GREENGRASS_RELEASE_VERSION}.zip
 ARG GREENGRASS_RELEASE_URI=https://d2s8p88vqu9w66.cloudfront.net/releases/${GREENGRASS_ZIP_FILE}
-
-LABEL maintainer="NoEatToStop"
-LABEL greengrass-version=${GREENGRASS_RELEASE_VERSION}
 
 ENV TINI_KILL_PROCESS_GROUP=1 \
     GGC_ROOT_PATH=/greengrass/v2 \
@@ -28,22 +24,35 @@ ENV TINI_KILL_PROCESS_GROUP=1 \
 COPY "greengrass-entrypoint.sh" /
 COPY "modify-sudoers.sh" /
 
+# 全依存を単一 RUN で install → cleanup してレイヤーサイズを最小化
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       openjdk-11-jre-headless \
       python3 \
+      ffmpeg \
       curl \
       unzip \
-      wget \
       sudo \
-      procps \
       tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && wget -q ${GREENGRASS_RELEASE_URI} \
-    && chmod +x /greengrass-entrypoint.sh /modify-sudoers.sh \
-    && mkdir -p /opt/greengrassv2 ${GGC_ROOT_PATH} \
-    && unzip ${GREENGRASS_ZIP_FILE} -d /opt/greengrassv2 \
-    && rm ${GREENGRASS_ZIP_FILE} \
-    && ./modify-sudoers.sh
+      ca-certificates \
+      gnupg \
+    && \
+    # Node.js 22 LTS (NodeSource)
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    # Greengrass V2
+    curl -sL ${GREENGRASS_RELEASE_URI} -o /tmp/gg.zip && \
+    chmod +x /greengrass-entrypoint.sh /modify-sudoers.sh && \
+    mkdir -p /opt/greengrassv2 ${GGC_ROOT_PATH} && \
+    unzip /tmp/gg.zip -d /opt/greengrassv2 && \
+    /modify-sudoers.sh && \
+    # Cleanup
+    rm -f /tmp/gg.zip && \
+    apt-get purge -y --auto-remove gnupg unzip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.npm
+
+# FrameCapture コンポーネント
+COPY components/ /opt/greengrass-components/
 
 ENTRYPOINT ["/greengrass-entrypoint.sh"]

@@ -70,33 +70,51 @@
     - Validate state transition logic with configurable thresholds
     - _Requirements: 2.2, 2.3, 2.4_
 
-- [ ] 5. Build Docker-based IoT Greengrass edge processing with IoT Core integration
-  - [ ] 5.1 Create Docker environment for IoT Greengrass Core
-    - Create docker-compose.yml for Greengrass Core container (machine-independent)
-    - Configure device mount for USB camera (/dev/video0)
-    - Set up AWS credentials and IoT certificates volume mapping
+- [x] 5. Greengrass 統合 Edge 環境の構築（案 B: 単一コンテナ統合）
+  - [x] 5.1 Greengrass Docker イメージの拡張
+    - Greengrass Dockerfile に Node.js 22 + Python 3.9 + ffmpeg を追加
+    - 不要パッケージの削除によるイメージサイズ最適化（338MB）
+    - イメージビルドと基本動作の確認
     - _Requirements: 2.1, 5.4_
 
-  - [ ] 5.2 Create edge processing service (TypeScript)
-    - Implement edge processor with frame analysis logic
-    - Add eating state determination with configurable thresholds
-    - Implement IoT Core MQTT publish for state change notifications
-    - Create meal start/end detection logic
+  - [x] 5.2 FrameCapture Greengrass カスタムコンポーネントの作成
+    - コンポーネントレシピ（recipe.yaml）の作成
+    - capture.js の TES 対応（環境変数認証 → TES 自動認証）
+    - コンポーネントアーティファクト（capture.js + package.json）の配置
+    - ローカルデプロイメント設定
+    - _Requirements: 2.1, 5.4_
+
+  - [x] 5.3 Greengrass 起動時のコンポーネント自動デプロイ
+    - greengrass-entrypoint.sh でローカルコンポーネントの初期デプロイ設定
+    - Greengrass CLI によるローカルデプロイの自動化
+    - プロビジョニング → コンポーネントデプロイ → 稼働の一連フローの確認
+    - _Requirements: 2.1, 5.4_
+
+  - [x] 5.4 docker-compose と不要ファイルの整理
+    - docker-compose.yml から frame-capture サービスを削除
+    - greengrass-core のボリュームマウント・環境変数を更新
+    - edge/frame-capture/ ディレクトリの削除（コードは Greengrass コンポーネントに移動済み）
+    - edge/.env.example から frame-capture 用 AWS 認証情報を削除
+    - _Requirements: 5.4_
+
+  - [x] 5.5 E2E テスト・ドキュメントの更新
+    - e2e-test.sh: frame-capture コンテナチェック → Greengrass コンポーネントチェックに変更
+    - edge/README.md, CLAUDE.md, README.md を案 B 構成に更新
+    - Edge E2E テスト 8/8 PASS 確認（2026-03-20）
+    - _Requirements: 5.4_
+    - **B案スコープ境界**: Edge E2E（GGコンテナ稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム）が対象。S3 Event Notification / IoT Topic Rule によるクラウド側自動処理は未実装（C案スコープ）
+
+  - [ ] 5.6 将来: ChewingAnalyzer コンポーネントの追加（Python）
+    - Python 3.9+ での映像分析コンポーネント
+    - FrameCapture との IPC 連携
+    - IoT Core MQTT による状態通知
     - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_
 
-  - [ ] 5.3 Implement TV control interface module
-    - Create TV control interface for external system integration
-    - Implement mock TV control service for testing and development
-    - Add error handling and retry mechanism for TV control failures
-    - Notify TV control events via IoT Core MQTT
+  - [ ] 5.7 将来: TV 制御インターフェースモジュール
+    - TV 制御コンポーネント（Greengrass カスタムコンポーネント）
+    - ChewingAnalyzer からの IPC 連携
+    - IoT Core MQTT でのイベント通知
     - _Requirements: 1.3, 1.4, 6.4, 6.6, 8.1, 8.2, 8.3, 8.4_
-
-  - [ ] 5.4 Create edge processing unit tests
-    - Test edge processor with mock frame data
-    - Test TV control interface with mock service
-    - Test IoT Core publish integration
-    - Verify state transition logic with configurable thresholds
-    - _Requirements: 2.1, 1.3, 1.4, 8.1, 8.2, 8.3, 8.4_
 
 - [ ] 6. Develop Vue.js web management interface
   - [x] 6.1 Set up Vue.js project with Tailwind CSS

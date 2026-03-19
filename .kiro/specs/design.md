@@ -2,10 +2,10 @@
 
 ## Overview
 
-NoEatToStopシステムは、エッジコンピューティングとクラウドベースの映像認識を組み合わせたハイブリッドアーキテクチャを採用します。Docker上のIoT Greengrass Coreコンテナでリアルタイム映像処理を行い、IoT Core経由でのデータ通知とAmazon Kinesis Video Streamsを通じてクラウド側の高精度な認識処理と連携します。エッジ処理はDocker上で動作するためマシン非依存（Raspberry Pi、開発PC等）です。
+NoEatToStopシステムは、エッジコンピューティングとクラウドベースの映像認識を組み合わせたハイブリッドアーキテクチャを採用する。Raspberry Pi 上の単一 Docker コンテナ（IoT Greengrass Core）内で、フレームキャプチャ・映像処理・IoT Core 連携を Greengrass カスタムコンポーネントとして統合実行する。RPi 3B のリソース制約（1GB RAM、7GB ディスク）に対応するため、Docker コンテナ数を最小化し、Greengrass の OTA デプロイ・TES 認証・ライフサイクル管理を活用する。
 
-システムは以下の3つの主要コンポーネントで構成されます：
-1. **エッジデバイス層**: Docker + IoT Greengrass Core + Local Lambda + カメラ
+システムは以下の3つの主要コンポーネントで構成される：
+1. **エッジデバイス層**: Docker + IoT Greengrass Core + カスタムコンポーネント（FrameCapture 等）+ カメラ
 2. **クラウド処理層**: KVS + Rekognition/Bedrock + Lambda
 3. **管理・制御層**: Vue.js SPA + CloudFront + S3
 
@@ -15,19 +15,18 @@ NoEatToStopシステムは、エッジコンピューティングとクラウド
 
 ```mermaid
 graph TB
-    subgraph "Host (macOS)"
-        MacCamera[Mac Camera]
-        FFmpegHost["ffmpeg (avfoundation → RTSP)"]
+    subgraph "Host (RPi / Mac)"
+        Camera["カメラ (IP / USB / Mac内蔵)"]
+        FFmpegHost["ffmpeg (ホスト側、USB/Mac時のみ)"]
+        MediaMTXHost["MediaMTX (Docker、USB/Mac時のみ)"]
     end
 
-    subgraph "Edge Device (Docker)"
-        GG[IoT Greengrass Core]
-        LocalLambda[Local Lambda Function]
-        LocalStorage[Local Video Storage]
-        TVControl[TV Control Module]
-        IoTCorePub[IoT Core Publish]
-        MediaMTX["MediaMTX (RTSP Server)"]
-        FrameCapture["frame-capture (ffmpeg + Node.js)"]
+    subgraph "Greengrass Core (単一 Docker コンテナ)"
+        GGNucleus["Greengrass Nucleus"]
+        TES["Token Exchange Service (TES)"]
+        FrameCaptureComp["コンポーネント: FrameCapture<br/>(Node.js + ffmpeg → S3)"]
+        FutureComp["コンポーネント: ChewingAnalyzer (将来)<br/>(Python + 映像分析)"]
+        MQTT["IoT Core MQTT"]
     end
 
     subgraph "AWS Cloud"
@@ -53,77 +52,108 @@ graph TB
 
     subgraph "Web Management"
         CloudFront[CloudFront CDN]
-        S3Web[S3 Static Hosting]
-        VueApp["Vue.js SPA (LiveVideo.vue)"]
+        VueApp["Vue.js SPA"]
     end
 
-    MacCamera --> FFmpegHost
-    FFmpegHost -->|"RTSP (tcp)"| MediaMTX
-    MediaMTX -->|RTSP| FrameCapture
-    FrameCapture -->|"PutObject"| S3Live
+    Camera -->|"RTSP 直接 or"| FrameCaptureComp
+    Camera --> FFmpegHost
+    FFmpegHost -->|RTSP| MediaMTXHost
+    MediaMTXHost -->|RTSP| FrameCaptureComp
 
-    GG --> LocalLambda
-    LocalLambda --> LocalStorage
-    LocalLambda --> TVControl
-    LocalLambda --> IoTCorePub
-    IoTCorePub --> ProcessingLambda
+    GGNucleus --> TES
+    TES -->|"一時認証情報"| FrameCaptureComp
+    FrameCaptureComp -->|"S3 PutObject"| S3Live
+    FrameCaptureComp -->|IPC| FutureComp
+    FutureComp -->|MQTT| MQTT
+    MQTT --> ProcessingLambda
 
     ProcessingLambda --> Rekognition
     ProcessingLambda --> Bedrock
-    ProcessingLambda --> S3Video
     ProcessingLambda --> DynamoDB
 
     S3Live --> FrameLambda
     FrameLambda -->|"presigned URL"| APIGateway
     DynamoDB --> APIGateway
-    DynamoDB --> CloudWatch
-    CloudWatch --> SNS
 
-    S3Web --> CloudFront
     CloudFront --> VueApp
-    VueApp -->|"GET /video/latest-frame"| APIGateway
+    VueApp -->|API| APIGateway
 ```
 
-### ライブ映像フロー（現在の実装）
+### Docker コンテナ構成（案 B: Greengrass 統合）
 
-Mac ではカメラデバイスを Docker に直接パススルーできないため、ffmpeg + MediaMTX (RTSP) 経由でフレームをキャプチャし、S3 + presigned URL で管理画面に配信する。リアルタイムストリーミングではなく、数秒間隔の静止画フレーム更新方式。
+RPi 3B のリソース制約に対応するため、Edge 処理を単一 Greengrass コンテナに統合する。
 
 ```
-ライブ映像の動作フロー
-=====================
+[Greengrass Core コンテナ] (Debian + Java 11 + Node.js 22 + Python 3.9 + ffmpeg)
+  ├── Greengrass Nucleus（コア・ライフサイクル管理）
+  ├── Token Exchange Service（TES: AWS 一時認証情報の自動取得）
+  ├── コンポーネント: com.noeatstop.FrameCapture
+  │     Node.js + ffmpeg: RTSP → 1フレーム取得 → S3 PutObject
+  │     認証: TES 経由（.env の AWS_ACCESS_KEY_ID 不要）
+  │     設定: RTSP_URL, CAPTURE_INTERVAL, S3_BUCKET（コンポーネント設定で管理）
+  ├── コンポーネント: 将来追加予定（ChewingAnalyzer 等）
+  │     Python + 映像分析ライブラリ
+  └── IoT Core MQTT 接続
 
-[Host macOS]                   [Docker]                        [AWS Cloud]              [Browser]
+[MediaMTX コンテナ] (USB カメラ / Mac 開発時のみ)
+  RTSP リレーサーバー
+```
+
+| 構成 | コンテナ数 | 用途 |
+|------|-----------|------|
+| RPi + IP カメラ | **1** (greengrass-core のみ) | 本番構成 |
+| RPi + USB カメラ | **2** (greengrass-core + mediamtx) | USB カメラ使用時 |
+| Mac 開発 | **2** (greengrass-core は不使用、mediamtx + frame-capture) | 開発用（※Mac では Greengrass 不可） |
+
+#### B案の実装スコープと境界（2026-03-20 E2E PASS で完了）
+
+B案は Edge インフラの統合改善であり、以下が対象：
+- FrameCapture を Greengrass Core 単一コンテナに統合（338MB イメージ）
+- Edge → S3 フレームアップロード
+- Edge → IoT Core MQTT Publish（到達確認まで）
+- GG Nucleus + TES + FrameCapture プロセスの統合実行
+
+**B案で未実装（C案スコープ）**:
+- S3 Event Notification（フレームアップロード → Lambda 自動トリガー）
+- IoT Topic Rule（MQTT → DynamoDB/Lambda 自動アクション）
+- ChewingAnalyzer コンポーネント（エッジ映像分析）
+- TV 制御コンポーネント
+
+現在の AWS 側は API ポーリング中心。Frontend が API Gateway 経由で S3 presigned URL を取得して表示する構成。Edge イベントからのクラウド側リアルタイム自動処理はC案で実装予定。
+
+### ライブ映像フロー
+
+RTSP ストリームから定期的にフレームをキャプチャし、S3 + presigned URL で管理画面に配信する。リアルタイムストリーミングではなく、数秒間隔の静止画フレーム更新方式。
+
+RPi 本番環境では、FrameCapture が Greengrass カスタムコンポーネントとして Greengrass Core コンテナ内で動作する。認証は TES（Token Exchange Service）経由で自動取得。
+
+```
+ライブ映像の動作フロー（RPi 本番: IP カメラ）
+=============================================
+
+[IP Camera]              [Greengrass Core コンテナ]              [AWS Cloud]              [Browser]
      |                              |                               |                       |
-     | 1. start-camera.sh           |                               |                       |
-     |    ffmpeg avfoundation       |                               |                       |
-     |------ RTSP (tcp) ---------->|                               |                       |
-     |                     MediaMTX (port 8554)                     |                       |
+     |                   FrameCapture コンポーネント                  |                       |
+     |<--- RTSP 接続 --------------|                               |                       |
+     |--- RTSP ストリーム --------->|                               |                       |
+     |                    1. ffmpeg -frames:v 1                     |                       |
+     |                       (RTSP → JPEG)                          |                       |
      |                              |                               |                       |
-     |                     frame-capture                            |                       |
-     |                      2. ffmpeg -frames:v 1                   |                       |
-     |                         (RTSP → JPEG)                        |                       |
-     |                              |                               |                       |
+     |                    2. TES → 一時認証情報取得                   |                       |
      |                              |--- 3. S3 PutObject ---------->|                       |
      |                              |    live-frames/latest.jpg     |                       |
-     |                              |         (3秒ごと繰り返し)       |                       |
+     |                              |     (CAPTURE_INTERVAL秒ごと)   |                       |
      |                              |                               |                       |
      |                              |                               |    4. GET /video/     |
      |                              |                               |<--- latest-frame -----|
-     |                              |                               |                       |
      |                              |                      Lambda: getLatestFrame            |
      |                              |                      S3 presigned URL生成 (60秒有効)    |
-     |                              |                               |                       |
      |                              |                               |--- 5. {url: "..."} -->|
-     |                              |                               |                       |
      |                              |                               |    6. GET presigned   |
      |                              |                               |<--- URL (S3直接) -----|
-     |                              |                               |                       |
      |                              |                               |--- 7. JPEG 画像 ----->|
-     |                              |                               |                       |
      |                              |                               |    8. <img> 表示      |
-     |                              |                               |    (liveVideoUpdate   |
-     |                              |                               |     Interval秒で      |
-     |                              |                               |     4-8を繰り返し)     |
+     |                              |                               |     (定期リフレッシュ)   |
 ```
 
 ### S3 ストレージ構造
@@ -144,68 +174,55 @@ noeatstop-videos-{stage}-{account}/
 
 ### 1. Edge Device Components
 
-#### Camera Module
-- **責任**: Mac カメラからの映像取得とクラウドへのフレーム配信
-- **技術**: ffmpeg (avfoundation) + MediaMTX (RTSP) + frame-capture (Node.js)
-- **仕様**: Mac 内蔵カメラ（640x480/30fps）
-- **配信方式**: RTSP → JPEG フレームキャプチャ → S3 アップロード（`CAPTURE_INTERVAL` 秒ごと）
-- **構成**:
-  - `start-camera.sh` (ホスト): ffmpeg で Mac カメラ → MediaMTX へ RTSP 配信
-  - `mediamtx` (Docker): RTSP サーバー（TCP、ポート 8554）
-  - `frame-capture` (Docker): RTSP から1フレーム取得 → S3 `live-frames/latest.jpg` にアップロード
-- **macOS 制約**: Docker on Mac ではカメラデバイス (`/dev/video0`) を直接パススルーできないため、ホスト側 ffmpeg → RTSP 経由で Docker に映像を渡す
-- **エラーハンドリング**: カメラ故障時は処理停止、TV制御も実行しない
-
-#### IoT Greengrass Core (Docker)
-- **責任**: エッジデバイスでのローカル処理とクラウド連携
-- **技術**: AWS IoT Greengrass v2（Docker コンテナとして起動）
-- **実行環境**: docker-compose で管理、マシン非依存
+#### IoT Greengrass Core (単一 Docker コンテナ)
+- **責任**: Edge 全機能の統合実行環境
+- **技術**: AWS IoT Greengrass V2（Docker コンテナ）
+- **ベースイメージ**: Debian bullseye-slim + Java 11 + Node.js 22 + Python 3.9 + ffmpeg
+- **実行環境**: docker-compose で管理。RPi 3B のリソース制約に対応するため単一コンテナに統合
 - **機能**:
-  - Local Lambda関数の実行環境
-  - デバイス証明書による認証
-  - IoT Core 経由でのデータ通知（MQTT Publish）
-  - クラウドとの双方向通信
+  - Greengrass カスタムコンポーネントの実行・ライフサイクル管理
+  - TES（Token Exchange Service）による AWS 一時認証情報の自動取得
+  - OTA（Over-The-Air）によるコンポーネントのリモート更新
+  - デバイス証明書による IoT Core 認証
+  - IoT Core 経由での MQTT Publish/Subscribe
+  - IPC（プロセス間通信）によるコンポーネント間連携
 
-#### Local Lambda Function
-- **責任**: エッジでの基本的な映像解析と制御判断
-- **技術**: TypeScript (Node.js 18)、Docker コンテナ内で実行
-- **処理内容**:
-  - 顔検出（人の顔認識閾値設定可能）
-  - 口の位置検出（口の位置認識閾値設定可能）
-  - 咀嚼動作の基本判定（咀嚼判定閾値設定可能）
-  - 食事開始判定：食器配置後の食事を口に運ぶ動作
-  - 食事終了判定：食器の片付け完了
-  - 複数子供対応：設定された子供数分の動作停止検出
-  - 大人検出除外：管理画面設定によるON/OFF制御
-- **設定可能パラメータ**:
-  - 動作停止閾値：デフォルト10秒
-  - 信頼度閾値：デフォルト80%
-  - 映像バッファ：デフォルト10秒
-  - 映像データ：デフォルト20秒間で判定
-- **データ通知**: IoT Core 経由で MQTT トピックに状態変化を Publish
-  - トピック: `noeatstop/{deviceId}/eating-state`
-  - トピック: `noeatstop/{deviceId}/tv-control`
-- **インターフェース**:
-  ```typescript
-  // エッジ処理のメインループ
-  async function processFrame(frame: FrameData, config: SystemConfiguration): Promise<void> {
-    const analysis = analyzeFrame(frame, config);
-    const eatingState = determineEatingState(analysis, config.childCount);
+#### Greengrass コンポーネント: com.noeatstop.FrameCapture
+- **責任**: RTSP ストリームからのフレームキャプチャと S3 アップロード
+- **技術**: Node.js 22 + ffmpeg（Greengrass コンテナ内で実行）
+- **認証**: TES 経由で S3 への一時認証情報を自動取得（.env の AWS_ACCESS_KEY_ID 不要）
+- **処理フロー**:
+  1. RTSP ストリームに接続（IP カメラ直接 or MediaMTX 経由）
+  2. ffmpeg で 1 フレーム取得（JPEG）
+  3. S3 PutObject で `live-frames/latest.jpg` にアップロード
+  4. `CAPTURE_INTERVAL` 秒待機して繰り返し
+- **コンポーネント設定**（Greengrass デプロイメント設定で管理）:
+  - `rtspUrl`: RTSP ソース URL（デフォルト: `rtsp://mediamtx:8554/camera`）
+  - `s3Bucket`: S3 バケット名
+  - `captureInterval`: キャプチャ間隔秒数（デフォルト: 3）
+  - `awsRegion`: AWS リージョン（デフォルト: `ap-northeast-1`）
+- **ライフサイクル**（recipe.yaml で定義）:
+  - Install: `npm install --omit=dev`
+  - Run: `node capture.js`（Greengrass が自動起動・再起動管理）
+- **エラーハンドリング**: キャプチャ失敗時はログ出力して次サイクルで再試行
 
-    // TV制御（即座にOFF）
-    if (eatingState === 'chewing_stopped_threshold_exceeded') {
-      await controlTV('OFF');
-    }
+#### Greengrass コンポーネント: 将来追加予定（ChewingAnalyzer）
+- **責任**: エッジでの映像分析と咀嚼状態判定
+- **技術**: Python 3.9 + 映像分析ライブラリ
+- **設計方針**: FrameCapture と IPC で連携。フレーム取得通知を受けてローカル分析を実行
+- **処理内容**（将来実装）:
+  - 顔検出・口の位置検出・咀嚼動作判定
+  - 食事開始/終了判定
+  - TV 制御判断
+  - IoT Core 経由でクラウドに状態通知
 
-    // IoT Core経由でクラウドに状態通知
-    await publishToIoTCore('noeatstop/device/eating-state', { state: eatingState, confidence: analysis.confidence });
-
-    // 信頼度が閾値未満の場合はKVSへ映像送信
-    if (analysis.confidence < config.confidenceThreshold) {
-      await sendToKVS(videoSegment);
-    }
-  }
-  ```
+#### カメラ入力（ホスト側）
+- **RTSP 接続パターン**:
+  - **パターン A（MediaMTX 経由）**: USB カメラ / Mac 内蔵カメラ使用時。ホスト ffmpeg → MediaMTX (Docker) → FrameCapture
+  - **パターン B（IP カメラ直接）**: `RTSP_URL` 設定時。FrameCapture が直接接続。MediaMTX 不要
+- **カメラ配信スクリプト**:
+  - Mac: `start-camera.sh`（avfoundation、640x480/30fps）
+  - RPi: `start-camera-rpi.sh`（v4l2 + mjpeg）
 
 #### TV Control Module
 - **責任**: パナソニック製テレビ（2022年製50インチ）の電源制御

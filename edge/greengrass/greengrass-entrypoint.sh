@@ -99,7 +99,67 @@ fi
 echo "Making loader script executable..."
 chmod +x $GGC_ROOT_PATH/alts/current/distro/bin/loader
 
+# --- FrameCapture コンポーネントの準備 ---
+COMPONENTS_SRC=/opt/greengrass-components
+FRAME_CAPTURE_WORK=/opt/frame-capture
+
+setup_frame_capture() {
+  echo "Setting up FrameCapture..."
+
+  FRAME_CAPTURE_SRC="${COMPONENTS_SRC}/com.noeatstop.FrameCapture/artifacts"
+  if [ ! -d "${FRAME_CAPTURE_SRC}" ]; then
+    echo "WARNING: FrameCapture artifacts not found at ${FRAME_CAPTURE_SRC}"
+    return 1
+  fi
+
+  mkdir -p "${FRAME_CAPTURE_WORK}"
+  cp -r "${FRAME_CAPTURE_SRC}/"* "${FRAME_CAPTURE_WORK}/"
+
+  # npm install（初回のみ、node_modules が無い場合）
+  if [ -f "${FRAME_CAPTURE_WORK}/package.json" ] && [ ! -d "${FRAME_CAPTURE_WORK}/node_modules" ]; then
+    echo "Installing FrameCapture dependencies..."
+    cd "${FRAME_CAPTURE_WORK}" && npm install --omit=dev 2>&1 | tail -5
+    cd /
+  fi
+
+  echo "FrameCapture ready at ${FRAME_CAPTURE_WORK}"
+}
+
+# FrameCapture プロセスをバックグラウンドで起動
+run_frame_capture() {
+  if [ ! -f "${FRAME_CAPTURE_WORK}/capture.js" ]; then
+    echo "WARNING: capture.js not found. FrameCapture will not start."
+    return
+  fi
+
+  if [ -z "${VIDEO_BUCKET}" ]; then
+    echo "WARNING: VIDEO_BUCKET not set. FrameCapture will not start."
+    return
+  fi
+
+  echo "Starting FrameCapture process..."
+  export RTSP_URL="${RTSP_URL:-rtsp://noeatstop-mediamtx:8554/camera}"
+  export S3_BUCKET="${VIDEO_BUCKET}"
+  export CAPTURE_INTERVAL="${CAPTURE_INTERVAL:-3}"
+  export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
+
+  cd "${FRAME_CAPTURE_WORK}" && node capture.js &
+  FRAME_CAPTURE_PID=$!
+  echo "FrameCapture started (PID: ${FRAME_CAPTURE_PID})"
+}
+
+# コンポーネントの準備
+setup_frame_capture
+
 echo "Starting Greengrass..."
 
-# Start greengrass kernel via the loader script and register container as a thing
-exec $GGC_ROOT_PATH/alts/current/distro/bin/loader
+# Greengrass Nucleus をバックグラウンドで起動
+$GGC_ROOT_PATH/alts/current/distro/bin/loader &
+GG_PID=$!
+
+# Greengrass 起動を少し待ってから FrameCapture を開始
+sleep 10
+run_frame_capture
+
+# Greengrass プロセスを待機（メインプロセス）
+wait $GG_PID
