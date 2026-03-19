@@ -105,6 +105,22 @@ RPi 3B のリソース制約に対応するため、Edge 処理を単一 Greengr
 | RPi + USB カメラ | **2** (greengrass-core + mediamtx) | USB カメラ使用時 |
 | Mac 開発 | **2** (greengrass-core は不使用、mediamtx + frame-capture) | 開発用（※Mac では Greengrass 不可） |
 
+#### B案の実装スコープと境界（2026-03-20 E2E PASS で完了）
+
+B案は Edge インフラの統合改善であり、以下が対象：
+- FrameCapture を Greengrass Core 単一コンテナに統合（338MB イメージ）
+- Edge → S3 フレームアップロード
+- Edge → IoT Core MQTT Publish（到達確認まで）
+- GG Nucleus + TES + FrameCapture プロセスの統合実行
+
+**B案で未実装（C案スコープ）**:
+- S3 Event Notification（フレームアップロード → Lambda 自動トリガー）
+- IoT Topic Rule（MQTT → DynamoDB/Lambda 自動アクション）
+- ChewingAnalyzer コンポーネント（エッジ映像分析）
+- TV 制御コンポーネント
+
+現在の AWS 側は API ポーリング中心。Frontend が API Gateway 経由で S3 presigned URL を取得して表示する構成。Edge イベントからのクラウド側リアルタイム自動処理はC案で実装予定。
+
 ### ライブ映像フロー
 
 RTSP ストリームから定期的にフレームをキャプチャし、S3 + presigned URL で管理画面に配信する。リアルタイムストリーミングではなく、数秒間隔の静止画フレーム更新方式。
