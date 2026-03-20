@@ -132,3 +132,20 @@ export async function getLatestFrame(): Promise<APIGatewayProxyResult> {
     return response(500, { error: (err as Error).message });
   }
 }
+
+export async function getLatestAnalyzedFrame(): Promise<APIGatewayProxyResult> {
+  try {
+    const bucket = process.env.VIDEO_BUCKET;
+    if (!bucket) return response(500, { error: 'VIDEO_BUCKET not configured' });
+
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: 'live-frames/latest-analyzed.jpg',
+    });
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 60 });
+
+    return response(200, { url });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}

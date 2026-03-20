@@ -74,6 +74,10 @@ export const videoApi = {
     const { data } = await apiClient.get<{ url: string }>('/video/latest-frame');
     return data.url;
   },
+  async getLatestAnalyzedFrameUrl(): Promise<string> {
+    const { data } = await apiClient.get<{ url: string }>('/video/latest-analyzed-frame');
+    return data.url;
+  },
 };
 
 export { apiClient };

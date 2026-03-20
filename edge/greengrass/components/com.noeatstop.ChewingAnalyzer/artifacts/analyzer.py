@@ -134,6 +134,7 @@ class ChewingAnalyzer:
             new_state = self.STATE_ENDED
             motion_score = 0.0
             self._update_state(new_state, motion_score, frame, faces)
+            self._upload_analyzed_frame(frame, faces, new_state, motion_score)
             self.prev_mouth_roi = None
             return
 
@@ -159,6 +160,7 @@ class ChewingAnalyzer:
             new_state = self.STATE_STOPPED
 
         self._update_state(new_state, avg_motion, frame, faces)
+        self._upload_analyzed_frame(frame, faces, new_state, avg_motion)
         self.prev_mouth_roi = mouth_roi.copy()
 
     def _calculate_motion(self, mouth_roi: np.ndarray) -> float:
@@ -246,6 +248,52 @@ class ChewingAnalyzer:
                 len(faces),
                 self.frame_count,
             )
+
+    def _upload_analyzed_frame(
+        self,
+        frame: np.ndarray,
+        faces: np.ndarray,
+        state: str,
+        motion_score: float,
+    ):
+        """バウンディングボックス付きフレームを S3 にアップロード（管理画面表示用）"""
+        if not self.s3 or not S3_BUCKET:
+            return
+
+        try:
+            annotated = frame.copy()
+
+            # 状態に応じた色: chewing=緑, stopped=黄, ended=赤
+            color_map = {
+                self.STATE_CHEWING: (0, 255, 0),
+                self.STATE_STOPPED: (0, 255, 255),
+                self.STATE_ENDED: (0, 0, 255),
+                self.STATE_WAITING: (128, 128, 128),
+            }
+            color = color_map.get(state, (255, 255, 255))
+
+            for fx, fy, fw, fh in faces:
+                # 顔バウンディングボックス
+                cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
+                # 口領域
+                mouth_y = int(fy + fh * (1 - MOUTH_ROI_RATIO))
+                cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
+
+            # 状態とスコアのテキスト表示
+            label = f"{state} motion:{int(motion_score)}"
+            cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+            # JPEG エンコード
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+            self.s3.put_object(
+                Bucket=S3_BUCKET,
+                Key="live-frames/latest-analyzed.jpg",
+                Body=buf.tobytes(),
+                ContentType="image/jpeg",
+            )
+        except Exception:
+            log.exception("分析フレームアップロード失敗")
 
     def _upload_evidence(
         self,

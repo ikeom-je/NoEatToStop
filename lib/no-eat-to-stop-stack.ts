@@ -305,6 +305,19 @@ export class NoEatToStopStack extends cdk.Stack {
       memorySize: 128,
     });
 
+    const getLatestAnalyzedFrameFn = new lambda.Function(this, 'GetLatestAnalyzedFrameHandler', {
+      functionName: `noeatstop-get-latest-analyzed-frame-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getLatestAnalyzedFrame',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: lambdaEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
     // API リソース定義
     const mealSessionResource = this.api.root.addResource('meal-session');
     const mealSessionIdResource = mealSessionResource.addResource('{sessionId}');
@@ -333,6 +346,8 @@ export class NoEatToStopStack extends cdk.Stack {
     const videoResource = this.api.root.addResource('video');
     const latestFrameResource = videoResource.addResource('latest-frame');
     latestFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestFrameFn));
+    const latestAnalyzedFrameResource = videoResource.addResource('latest-analyzed-frame');
+    latestAnalyzedFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestAnalyzedFrameFn));
 
     // ========================================
     // CloudFront Distribution

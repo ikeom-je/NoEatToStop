@@ -9,6 +9,7 @@ const isStreaming = ref(false);
 const isLoading = ref(false);
 const frameUrl = ref<string | null>(null);
 const errorMessage = ref<string | null>(null);
+const showAnalyzed = ref(true);
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 function startStreaming() {
@@ -29,7 +30,11 @@ function stopStreaming() {
 async function refreshFrame() {
   isLoading.value = true;
   try {
-    frameUrl.value = await videoApi.getLatestFrameUrl();
+    if (showAnalyzed.value) {
+      frameUrl.value = await videoApi.getLatestAnalyzedFrameUrl();
+    } else {
+      frameUrl.value = await videoApi.getLatestFrameUrl();
+    }
     errorMessage.value = null;
     lastUpdated.value = new Date().toLocaleTimeString('ja-JP');
   } catch {
@@ -90,6 +95,14 @@ onUnmounted(() => {
           >
             映像停止
           </button>
+          <label class="flex items-center gap-1 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              v-model="showAnalyzed"
+              data-testid="show-analyzed-toggle"
+            />
+            検出表示
+          </label>
         </div>
 
         <div class="text-sm text-gray-500">
