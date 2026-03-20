@@ -34,7 +34,7 @@
 
 ### Mac vs RPi の違い
 - **Mac 開発環境**: frame-capture → S3 パイプラインのみ。Greengrass Core は macOS 上で動作しない（IPC 制限）
-- **RPi 本番環境**: Greengrass Core 単一コンテナ内で FrameCapture プロセスを統合実行 + IoT Core MQTT 連携
+- **RPi 本番環境**: Greengrass Core 単一コンテナ内で FrameCapture + ChewingAnalyzer を統合実行 + IoT Core MQTT 連携
 
 ### RTSP 接続パターン
 - **パターン A（MediaMTX 経由）**: `RTSP_URL` 未設定時。ホスト側 ffmpeg でカメラ映像を MediaMTX に配信
@@ -46,7 +46,19 @@
 - **Mac 開発**: `docker compose up mediamtx --profile dev frame-capture-dev -d --build` → `./start-camera.sh`
 - **RPi 本番（IP カメラ）**: `docker compose up greengrass-core -d --build`（コンテナ1つのみ）
 - **RPi 本番（USB カメラ）**: `docker compose up greengrass-core mediamtx -d --build` → `./start-camera-rpi.sh`
-- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（8項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム）
+- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（10項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム・ChewingAnalyzerプロセス・初期化確認）
+
+### Greengrass コンポーネント
+- **FrameCapture** (Node.js): RTSP → ffmpeg → `/tmp/frame.jpg` → S3 `live-frames/latest.jpg`
+- **ChewingAnalyzer** (Python + OpenCV): `/tmp/frame.jpg` 監視 → 顔検出(Haar Cascade) → 口領域差分 → 咀嚼判定 → BB付き画像を S3 `live-frames/latest-analyzed.jpg` にアップロード
+
+### ChewingAnalyzer 咀嚼判定ロジック
+1. **顔検出**: OpenCV Haar Cascade（正面顔、minSize=60x60）
+2. **口領域**: 顔矩形の下部 30%（`MOUTH_ROI_RATIO`）を口領域と仮定
+3. **差分計算**: 前フレームとの口領域ピクセル差分量（`cv2.absdiff` → `np.sum`）
+4. **咀嚼判定**: 直近5フレーム（`ANALYSIS_FRAME_COUNT`）の平均差分量が閾値（`CHEWING_MOTION_THRESHOLD=500`）超 → chewing
+5. **状態**: chewing / chewing_stopped / meal_ended / waiting
+6. **エビデンス**: 状態変化時にBB付き画像を S3 `evidence/` にアップロード
 
 ## 開発ルール
 

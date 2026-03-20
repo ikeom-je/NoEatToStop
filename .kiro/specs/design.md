@@ -84,15 +84,18 @@ graph TB
 RPi 3B のリソース制約に対応するため、Edge 処理を単一 Greengrass コンテナに統合する。
 
 ```
-[Greengrass Core コンテナ] (Debian + Java 11 + Node.js 22 + Python 3.9 + ffmpeg)
+[Greengrass Core コンテナ] (Debian bullseye-slim + Java 11 + Node.js 22 + Python 3.9 + OpenCV 4.5 + ffmpeg)
   ├── Greengrass Nucleus（コア・ライフサイクル管理）
   ├── Token Exchange Service（TES: AWS 一時認証情報の自動取得）
   ├── コンポーネント: com.noeatstop.FrameCapture
-  │     Node.js + ffmpeg: RTSP → 1フレーム取得 → S3 PutObject
+  │     Node.js + ffmpeg: RTSP → 1フレーム取得 → /tmp/frame.jpg → S3 PutObject
   │     認証: TES 経由（.env の AWS_ACCESS_KEY_ID 不要）
-  │     設定: RTSP_URL, CAPTURE_INTERVAL, S3_BUCKET（コンポーネント設定で管理）
-  ├── コンポーネント: 将来追加予定（ChewingAnalyzer 等）
-  │     Python + 映像分析ライブラリ
+  │     設定: RTSP_URL, CAPTURE_INTERVAL, S3_BUCKET
+  ├── コンポーネント: com.noeatstop.ChewingAnalyzer
+  │     Python 3.9 + OpenCV: /tmp/frame.jpg 監視 → 顔検出 → 口領域差分 → 咀嚼判定
+  │     → BB付き画像を S3 live-frames/latest-analyzed.jpg にアップロード
+  │     → 状態変化時にエビデンス画像を S3 evidence/ にアップロード
+  ├── コンポーネント: 将来追加予定（TVController 等）
   └── IoT Core MQTT 接続
 
 [MediaMTX コンテナ] (USB カメラ / Mac 開発時のみ)
@@ -116,10 +119,18 @@ B案は Edge インフラの統合改善であり、以下が対象：
 **B案で未実装（C案スコープ）**:
 - S3 Event Notification（フレームアップロード → Lambda 自動トリガー）
 - IoT Topic Rule（MQTT → DynamoDB/Lambda 自動アクション）
-- ChewingAnalyzer コンポーネント（エッジ映像分析）
 - TV 制御コンポーネント
 
-現在の AWS 側は API ポーリング中心。Frontend が API Gateway 経由で S3 presigned URL を取得して表示する構成。Edge イベントからのクラウド側リアルタイム自動処理はC案で実装予定。
+**C案 Phase 1 実装済み（ChewingAnalyzer）**:
+- ChewingAnalyzer コンポーネント（OpenCV Haar Cascade 顔検出 + 口領域差分 + 咀嚼判定）
+- 毎フレーム BB 付き分析画像を S3 `live-frames/latest-analyzed.jpg` にアップロード
+- 管理画面で生フレーム/分析フレーム切替表示（`/video/latest-analyzed-frame` API）
+- Edge E2E テスト 10/10 PASS
+
+**C案で未実装**:
+- MQTT 通知（Edge → AWS IoT Core → DynamoDB 記録）
+- IoT Topic Rule / S3 Event Notification
+- TV 制御コンポーネント（TVController）
 
 ### ライブ映像フロー
 
@@ -161,7 +172,11 @@ RPi 本番環境では、FrameCapture が Greengrass カスタムコンポーネ
 ```
 noeatstop-videos-{stage}-{account}/
 ├── live-frames/                   ← ライブ映像フレーム (1日で自動削除)
-│   └── latest.jpg                 ← 最新フレーム (frame-capture が上書き更新)
+│   ├── latest.jpg                 ← 最新フレーム (FrameCapture が上書き更新)
+│   └── latest-analyzed.jpg        ← BB付き分析フレーム (ChewingAnalyzer が上書き更新)
+├── evidence/                      ← 検出エビデンス (1日で自動削除)
+│   └── YYYY-MM-DD/
+│       └── {event_type}_{HHMMSS}.jpg  ← 状態変化時の顔BB+口領域付き画像
 └── daily/                         ← 食事セッション映像 (1日で自動削除)
     └── YYYY-MM-DD/
         └── session-{sessionId}/
@@ -206,15 +221,25 @@ noeatstop-videos-{stage}-{account}/
   - Run: `node capture.js`（Greengrass が自動起動・再起動管理）
 - **エラーハンドリング**: キャプチャ失敗時はログ出力して次サイクルで再試行
 
-#### Greengrass コンポーネント: 将来追加予定（ChewingAnalyzer）
+#### Greengrass コンポーネント: com.noeatstop.ChewingAnalyzer
 - **責任**: エッジでの映像分析と咀嚼状態判定
-- **技術**: Python 3.9 + 映像分析ライブラリ
-- **設計方針**: FrameCapture と IPC で連携。フレーム取得通知を受けてローカル分析を実行
-- **処理内容**（将来実装）:
-  - 顔検出・口の位置検出・咀嚼動作判定
-  - 食事開始/終了判定
-  - TV 制御判断
-  - IoT Core 経由でクラウドに状態通知
+- **技術**: Python 3.9 + OpenCV 4.5（apt python3-opencv）+ boto3
+- **連携方式**: FrameCapture が `/tmp/frame.jpg` に書き出し → ChewingAnalyzer がファイル更新を検知して分析
+- **咀嚼判定ロジック**:
+  1. **顔検出**: OpenCV Haar Cascade（`haarcascade_frontalface_default.xml` 同梱）。`scaleFactor=1.3`, `minNeighbors=5`, `minSize=(60,60)`。複数顔検出時は最大面積を使用
+  2. **口領域抽出**: 顔矩形の下部 30%（`MOUTH_ROI_RATIO`）を口領域と仮定（顔ランドマーク未使用）
+  3. **差分計算**: 前フレームと現フレームの口領域を `cv2.absdiff` → `np.sum` でピクセル差分量を算出
+  4. **咀嚼判定**: 直近 `ANALYSIS_FRAME_COUNT=5` フレームの平均差分量が `CHEWING_MOTION_THRESHOLD=500` 超 → chewing
+  5. **状態遷移**: `waiting` → `chewing` / `chewing_stopped` / `meal_ended`
+- **S3 アップロード**:
+  - **毎フレーム**: BB付き画像を `live-frames/latest-analyzed.jpg` に上書き（管理画面表示用）
+  - **状態変化時**: エビデンス画像を `evidence/{date}/{event_type}_{time}.jpg` にアップロード
+- **BB 表示**:
+  - 顔矩形: 状態色（緑=chewing、黄=stopped、赤=ended）
+  - 口領域: 青枠
+  - テキスト: 状態 + motion スコア（左上）
+- **設定パラメータ**: `CHEWING_MOTION_THRESHOLD`, `FACE_DETECTION_SCALE`, `MOUTH_ROI_RATIO`, `ANALYSIS_FRAME_COUNT`, `PAUSE_THRESHOLD`
+- **現在の限界**: 正面顔のみ（横顔不可）、口位置は固定比率推定、照明変化・カメラ揺れで誤検出の可能性あり
 
 #### カメラ入力（ホスト側）
 - **RTSP 接続パターン**:

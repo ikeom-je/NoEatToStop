@@ -99,9 +99,10 @@ fi
 echo "Making loader script executable..."
 chmod +x $GGC_ROOT_PATH/alts/current/distro/bin/loader
 
-# --- FrameCapture コンポーネントの準備 ---
+# --- コンポーネントの準備 ---
 COMPONENTS_SRC=/opt/greengrass-components
 FRAME_CAPTURE_WORK=/opt/frame-capture
+CHEWING_ANALYZER_WORK=/opt/chewing-analyzer
 
 setup_frame_capture() {
   echo "Setting up FrameCapture..."
@@ -148,8 +149,49 @@ run_frame_capture() {
   echo "FrameCapture started (PID: ${FRAME_CAPTURE_PID})"
 }
 
+# --- ChewingAnalyzer コンポーネントの準備 ---
+setup_chewing_analyzer() {
+  echo "Setting up ChewingAnalyzer..."
+
+  ANALYZER_SRC="${COMPONENTS_SRC}/com.noeatstop.ChewingAnalyzer/artifacts"
+  if [ ! -d "${ANALYZER_SRC}" ]; then
+    echo "WARNING: ChewingAnalyzer artifacts not found at ${ANALYZER_SRC}"
+    return 1
+  fi
+
+  mkdir -p "${CHEWING_ANALYZER_WORK}"
+  cp -r "${ANALYZER_SRC}/"* "${CHEWING_ANALYZER_WORK}/"
+
+  # 依存パッケージ確認（Docker ビルド時にインストール済み）
+  if python3 -c "import boto3, cv2" 2>/dev/null; then
+    echo "ChewingAnalyzer dependencies OK"
+  else
+    echo "WARNING: ChewingAnalyzer dependencies missing (boto3 or cv2)"
+  fi
+
+  echo "ChewingAnalyzer ready at ${CHEWING_ANALYZER_WORK}"
+}
+
+# ChewingAnalyzer プロセスをバックグラウンドで起動
+run_chewing_analyzer() {
+  if [ ! -f "${CHEWING_ANALYZER_WORK}/analyzer.py" ]; then
+    echo "WARNING: analyzer.py not found. ChewingAnalyzer will not start."
+    return
+  fi
+
+  echo "Starting ChewingAnalyzer process..."
+  export FRAME_PATH="/tmp/frame.jpg"
+  export S3_BUCKET="${VIDEO_BUCKET}"
+  export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
+
+  cd "${CHEWING_ANALYZER_WORK}" && python3 analyzer.py &
+  CHEWING_ANALYZER_PID=$!
+  echo "ChewingAnalyzer started (PID: ${CHEWING_ANALYZER_PID})"
+}
+
 # コンポーネントの準備
 setup_frame_capture
+setup_chewing_analyzer
 
 echo "Starting Greengrass..."
 
@@ -160,6 +202,11 @@ GG_PID=$!
 # Greengrass 起動を少し待ってから FrameCapture を開始
 sleep 10
 run_frame_capture
+
+# FrameCapture が最初のフレームを書き出すまで待機
+echo "Waiting for first frame..."
+sleep 5
+run_chewing_analyzer
 
 # Greengrass プロセスを待機（メインプロセス）
 wait $GG_PID

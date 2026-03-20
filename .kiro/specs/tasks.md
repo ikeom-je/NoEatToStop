@@ -104,10 +104,15 @@
     - _Requirements: 5.4_
     - **B案スコープ境界**: Edge E2E（GGコンテナ稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム）が対象。S3 Event Notification / IoT Topic Rule によるクラウド側自動処理は未実装（C案スコープ）
 
-  - [ ] 5.6 将来: ChewingAnalyzer コンポーネントの追加（Python）
-    - Python 3.9+ での映像分析コンポーネント
-    - FrameCapture との IPC 連携
-    - IoT Core MQTT による状態通知
+  - [x] 5.6 ChewingAnalyzer コンポーネントの追加（Python + OpenCV）
+    - Python 3.9 + OpenCV Haar Cascade による顔検出・口領域差分・咀嚼判定
+    - FrameCapture との連携: /tmp/frame.jpg ファイル監視方式
+    - 毎フレーム BB 付き画像を S3 `live-frames/latest-analyzed.jpg` にアップロード
+    - 状態変化時にエビデンス画像を S3 `evidence/` にアップロード
+    - Lambda `getLatestAnalyzedFrame` + API `/video/latest-analyzed-frame` 追加
+    - 管理画面で検出表示切替（LiveVideo.vue チェックボックス）
+    - Edge E2E テスト 10/10 PASS 確認（2026-03-20）
+    - MQTT 通知は別ブランチ（feat/edge/mqtt）で実装予定
     - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_
 
   - [ ] 5.7 将来: TV 制御インターフェースモジュール
