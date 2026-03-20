@@ -106,6 +106,23 @@ else
   fail "ChewingAnalyzer 初期化ログが見つかりません"
 fi
 
+# 10. MQTT → DynamoDB 結合確認
+echo "[10] MQTT → DynamoDB ChewingStates 結合確認"
+ITEM_COUNT=$(aws dynamodb scan --table-name ChewingStates-dev --region "$REGION" --select COUNT --query 'Count' --output text 2>/dev/null || echo "0")
+if [ "$ITEM_COUNT" -gt 0 ] 2>/dev/null; then
+  pass "ChewingStates テーブルにレコード存在 (${ITEM_COUNT} 件)"
+else
+  fail "ChewingStates テーブルにレコードがありません"
+fi
+
+# 11. MQTT 送信ログ確認
+echo "[11] ChewingAnalyzer MQTT 送信ログ確認"
+if docker logs noeatstop-gg-core 2>&1 | grep -q "MQTT 送信:"; then
+  pass "MQTT 送信ログ確認"
+else
+  fail "MQTT 送信ログが見つかりません"
+fi
+
 # 結果サマリー
 echo ""
 echo "=== テスト結果 ==="

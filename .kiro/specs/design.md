@@ -127,9 +127,14 @@ B案は Edge インフラの統合改善であり、以下が対象：
 - 管理画面で生フレーム/分析フレーム切替表示（`/video/latest-analyzed-frame` API）
 - Edge E2E テスト 10/10 PASS
 
+**C案 Phase 2 実装済み（MQTT → DynamoDB）**:
+- ChewingAnalyzer が状態変化時に MQTT で `noeatstop/{deviceId}/chewing-state` に JSON publish
+- IoT Topic Rule → Lambda `handleChewingState` → DynamoDB `ChewingStates` テーブルに保存
+- DynamoDB TTL（`expiresAt`）で自動削除。保管日数は SystemSettings `chewingStateRetentionDays`（デフォルト7日）
+- Edge E2E テスト 12/12 PASS
+
 **C案で未実装**:
-- MQTT 通知（Edge → AWS IoT Core → DynamoDB 記録）
-- IoT Topic Rule / S3 Event Notification
+- S3 Event Notification（フレームアップロード → Lambda 自動トリガー）
 - TV 制御コンポーネント（TVController）
 
 ### ライブ映像フロー

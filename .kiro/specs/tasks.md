@@ -112,8 +112,15 @@
     - Lambda `getLatestAnalyzedFrame` + API `/video/latest-analyzed-frame` 追加
     - 管理画面で検出表示切替（LiveVideo.vue チェックボックス）
     - Edge E2E テスト 10/10 PASS 確認（2026-03-20）
-    - MQTT 通知は別ブランチ（feat/edge/mqtt）で実装予定
     - _Requirements: 2.1, 1.1, 1.2, 1.3, 2.5_
+
+  - [x] 5.6.1 MQTT 通知 + DynamoDB 保存パイプライン
+    - ChewingAnalyzer が状態変化時に MQTT publish（boto3 iot-data）
+    - トピック: `noeatstop/{deviceId}/chewing-state`
+    - IoT Topic Rule → Lambda `handleChewingState` → DynamoDB `ChewingStates` テーブル
+    - DynamoDB TTL（`expiresAt`）で自動削除、保管日数デフォルト7日（`chewingStateRetentionDays`）
+    - Edge E2E テスト 12/12 PASS 確認（2026-03-20）
+    - _Requirements: 2.1, 3.1, 3.2_
 
   - [ ] 5.7 将来: TV 制御インターフェースモジュール
     - TV 制御コンポーネント（Greengrass カスタムコンポーネント）

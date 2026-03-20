@@ -46,11 +46,17 @@
 - **Mac 開発**: `docker compose up mediamtx --profile dev frame-capture-dev -d --build` → `./start-camera.sh`
 - **RPi 本番（IP カメラ）**: `docker compose up greengrass-core -d --build`（コンテナ1つのみ）
 - **RPi 本番（USB カメラ）**: `docker compose up greengrass-core mediamtx -d --build` → `./start-camera-rpi.sh`
-- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（10項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCaptureプロセス・S3フレーム・ChewingAnalyzerプロセス・初期化確認）
+- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（12項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCapture・S3フレーム・ChewingAnalyzer・初期化・MQTT→DynamoDB結合・MQTT送信ログ）
 
 ### Greengrass コンポーネント
 - **FrameCapture** (Node.js): RTSP → ffmpeg → `/tmp/frame.jpg` → S3 `live-frames/latest.jpg`
-- **ChewingAnalyzer** (Python + OpenCV): `/tmp/frame.jpg` 監視 → 顔検出(Haar Cascade) → 口領域差分 → 咀嚼判定 → BB付き画像を S3 `live-frames/latest-analyzed.jpg` にアップロード
+- **ChewingAnalyzer** (Python + OpenCV): `/tmp/frame.jpg` 監視 → 顔検出(Haar Cascade) → 口領域差分 → 咀嚼判定 → BB付き画像を S3 `live-frames/latest-analyzed.jpg` にアップロード → 状態変化時に MQTT 送信
+
+### MQTT → DynamoDB パイプライン
+- **トピック**: `noeatstop/{deviceId}/chewing-state`
+- **IoT Topic Rule** → Lambda `handleChewingState` → DynamoDB `ChewingStates` テーブル
+- **TTL**: `expiresAt` 属性で自動削除（デフォルト7日、`chewingStateRetentionDays` 設定で変更可能）
+- **IOT_ENDPOINT**: `edge/.env` に設定。`aws iot describe-endpoint --endpoint-type iot:Data-ATS` で取得
 
 ### ChewingAnalyzer 咀嚼判定ロジック
 1. **顔検出**: OpenCV Haar Cascade（正面顔、minSize=60x60）

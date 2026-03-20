@@ -1,5 +1,5 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -148,4 +148,48 @@ export async function getLatestAnalyzedFrame(): Promise<APIGatewayProxyResult> {
   } catch (err) {
     return response(500, { error: (err as Error).message });
   }
+}
+
+/**
+ * IoT Rule から呼び出される Lambda ハンドラー
+ * MQTT メッセージを ChewingStates DynamoDB テーブルに保存
+ */
+export async function handleChewingState(event: Record<string, unknown>): Promise<void> {
+  const tableName = process.env.CHEWING_STATES_TABLE;
+  if (!tableName) {
+    console.error('CHEWING_STATES_TABLE not configured');
+    return;
+  }
+
+  // SystemSettings から保管日数を取得（デフォルト 7 日）
+  let retentionDays = 7;
+  try {
+    const val = await settingsRepo.getSetting('chewingStateRetentionDays');
+    if (val) retentionDays = parseInt(val, 10) || 7;
+  } catch {
+    // デフォルト値を使用
+  }
+
+  const epochSeconds = typeof event.epochSeconds === 'number' ? event.epochSeconds : Math.floor(Date.now() / 1000);
+  const expiresAt = epochSeconds + retentionDays * 86400;
+
+  const item: Record<string, { S: string } | { N: string }> = {
+    deviceId: { S: String(event.deviceId || 'unknown') },
+    epochSeconds: { N: String(epochSeconds) },
+    state: { S: String(event.state || '') },
+    prevState: { S: String(event.prevState || '') },
+    motionScore: { N: String(event.motionScore ?? 0) },
+    facesDetected: { N: String(event.facesDetected ?? 0) },
+    stoppedDuration: { N: String(event.stoppedDuration ?? 0) },
+    frameCount: { N: String(event.frameCount ?? 0) },
+    timestamp: { S: String(event.timestamp || new Date().toISOString()) },
+    expiresAt: { N: String(expiresAt) },
+  };
+
+  await ddbClient.send(new PutItemCommand({
+    TableName: tableName,
+    Item: item,
+  }));
+
+  console.log(`ChewingState saved: ${event.state} (device=${event.deviceId}, ttl=${retentionDays}d)`);
 }
