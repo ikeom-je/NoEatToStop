@@ -32,6 +32,8 @@ services:
       - RTSP_URL=${RTSP_URL}
       - VIDEO_BUCKET=${VIDEO_BUCKET}
       - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-3}
+      # ChewingAnalyzer MQTT 送信用
+      - IOT_ENDPOINT=${IOT_ENDPOINT:-}
     restart: unless-stopped
     networks:
       - noeatstop-edge
