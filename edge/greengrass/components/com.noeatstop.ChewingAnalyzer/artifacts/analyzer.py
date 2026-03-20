@@ -42,6 +42,11 @@ ANALYSIS_FRAME_COUNT = int(os.environ.get("ANALYSIS_FRAME_COUNT", "5"))
 PAUSE_THRESHOLD = float(os.environ.get("PAUSE_THRESHOLD", "10"))
 EVIDENCE_ON_STATE_CHANGE = os.environ.get("EVIDENCE_ON_STATE_CHANGE", "true").lower() == "true"
 
+# MQTT 設定
+THING_NAME = os.environ.get("THING_NAME", "noeatstop-edge-device")
+IOT_ENDPOINT = os.environ.get("IOT_ENDPOINT", "")
+MQTT_TOPIC = f"noeatstop/{THING_NAME}/chewing-state"
+
 # ポーリング間隔（FrameCapture の CAPTURE_INTERVAL に合わせる）
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "0.5"))
 
@@ -66,6 +71,18 @@ class ChewingAnalyzer:
 
         # S3 クライアント（エビデンスアップロード用）
         self.s3 = boto3.client("s3", region_name=AWS_REGION) if S3_BUCKET else None
+
+        # IoT Data Plane クライアント（MQTT 送信用）
+        if IOT_ENDPOINT:
+            self.iot_data = boto3.client(
+                "iot-data",
+                region_name=AWS_REGION,
+                endpoint_url=f"https://{IOT_ENDPOINT}",
+            )
+            log.info("MQTT 送信有効: topic=%s, endpoint=%s", MQTT_TOPIC, IOT_ENDPOINT)
+        else:
+            self.iot_data = None
+            log.warning("IOT_ENDPOINT 未設定 — MQTT 送信は無効")
 
         # 分析状態
         self.prev_mouth_roi = None
@@ -212,6 +229,8 @@ class ChewingAnalyzer:
                 motion_score,
                 len(faces),
             )
+            # MQTT 送信
+            self._publish_state(new_state, prev_state, motion_score, len(faces), stopped_duration)
             # エビデンスアップロード
             if EVIDENCE_ON_STATE_CHANGE and self.s3:
                 self._upload_evidence(frame, faces, new_state, motion_score)
@@ -248,6 +267,41 @@ class ChewingAnalyzer:
                 len(faces),
                 self.frame_count,
             )
+
+    def _publish_state(
+        self,
+        state: str,
+        prev_state: str,
+        motion_score: float,
+        faces_count: int,
+        stopped_duration: float,
+    ):
+        """状態変化を MQTT で送信"""
+        if not self.iot_data:
+            return
+
+        now = datetime.now(timezone.utc)
+        payload = {
+            "deviceId": THING_NAME,
+            "state": state,
+            "prevState": prev_state,
+            "motionScore": int(motion_score),
+            "facesDetected": faces_count,
+            "stoppedDuration": round(stopped_duration, 1),
+            "frameCount": self.frame_count,
+            "timestamp": now.isoformat(),
+            "epochSeconds": int(now.timestamp()),
+        }
+
+        try:
+            self.iot_data.publish(
+                topic=MQTT_TOPIC,
+                qos=1,
+                payload=json.dumps(payload),
+            )
+            log.info("MQTT 送信: %s → %s (motion=%d)", prev_state, state, int(motion_score))
+        except Exception:
+            log.exception("MQTT 送信失敗")
 
     def _upload_analyzed_frame(
         self,

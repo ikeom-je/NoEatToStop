@@ -183,6 +183,8 @@ run_chewing_analyzer() {
   export FRAME_PATH="/tmp/frame.jpg"
   export S3_BUCKET="${VIDEO_BUCKET}"
   export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
+  export THING_NAME="${THING_NAME:-noeatstop-edge-device}"
+  export IOT_ENDPOINT="${IOT_ENDPOINT:-}"
 
   cd "${CHEWING_ANALYZER_WORK}" && python3 analyzer.py &
   CHEWING_ANALYZER_PID=$!
