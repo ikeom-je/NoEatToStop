@@ -90,6 +90,22 @@ else
   fail "S3 に live-frames/latest.jpg が見つかりません"
 fi
 
+# 8. ChewingAnalyzer プロセス稼働確認（Greengrass コンテナ内）
+echo "[8] ChewingAnalyzer プロセス稼働確認"
+if docker exec noeatstop-gg-core sh -c 'cat /proc/*/cmdline 2>/dev/null | tr "\0" "\n" | grep -q "analyzer.py"'; then
+  pass "ChewingAnalyzer プロセスが Greengrass コンテナ内で稼働中"
+else
+  fail "ChewingAnalyzer プロセスが見つかりません"
+fi
+
+# 9. ChewingAnalyzer ログ確認
+echo "[9] ChewingAnalyzer 分析ログ確認"
+if docker logs noeatstop-gg-core 2>&1 | grep -q "ChewingAnalyzer 初期化完了"; then
+  pass "ChewingAnalyzer が正常に初期化済み"
+else
+  fail "ChewingAnalyzer 初期化ログが見つかりません"
+fi
+
 # 結果サマリー
 echo ""
 echo "=== テスト結果 ==="

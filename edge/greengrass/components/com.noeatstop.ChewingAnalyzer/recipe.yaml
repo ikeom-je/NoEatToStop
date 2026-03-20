@@ -1,0 +1,41 @@
+---
+RecipeFormatVersion: "2020-01-25"
+ComponentName: com.noeatstop.ChewingAnalyzer
+ComponentVersion: "1.0.0"
+ComponentDescription: "フレーム画像から顔検出・咀嚼判定を行い、エビデンスを S3 にアップロードするコンポーネント"
+ComponentPublisher: NoEatToStop
+ComponentConfiguration:
+  DefaultConfiguration:
+    framePath: "/tmp/frame.jpg"
+    s3Bucket: ""
+    awsRegion: "ap-northeast-1"
+    # 咀嚼判定パラメータ
+    chewingMotionThreshold: "500"
+    faceDetectionScale: "1.3"
+    mouthROIRatio: "0.3"
+    analysisFrameCount: "5"
+    pauseThreshold: "10"
+    # エビデンス
+    evidenceOnStateChange: "true"
+Manifests:
+  - Platform:
+      os: linux
+    Lifecycle:
+      install: |-
+        cd {artifacts:path}
+        pip3 install --user -r requirements.txt
+      run: |-
+        cd {artifacts:path}
+        export FRAME_PATH="{configuration:/framePath}"
+        export S3_BUCKET="{configuration:/s3Bucket}"
+        export AWS_REGION="{configuration:/awsRegion}"
+        export CHEWING_MOTION_THRESHOLD="{configuration:/chewingMotionThreshold}"
+        export FACE_DETECTION_SCALE="{configuration:/faceDetectionScale}"
+        export MOUTH_ROI_RATIO="{configuration:/mouthROIRatio}"
+        export ANALYSIS_FRAME_COUNT="{configuration:/analysisFrameCount}"
+        export PAUSE_THRESHOLD="{configuration:/pauseThreshold}"
+        export EVIDENCE_ON_STATE_CHANGE="{configuration:/evidenceOnStateChange}"
+        python3 analyzer.py
+    Artifacts:
+      - URI: "file:///opt/greengrass-components/com.noeatstop.ChewingAnalyzer/artifacts/"
+        Unarchive: NONE

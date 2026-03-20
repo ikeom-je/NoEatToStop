@@ -1,5 +1,5 @@
-# Greengrass V2 + Node.js 22 + Python 3 + ffmpeg
-# Plan B: 単一コンテナ統合（RPi 3B 向け最小構成）
+# Greengrass V2 + Node.js 22 + Python 3 + ffmpeg + OpenCV
+# Plan B/C: 単一コンテナ統合（RPi 3B 向け、ChewingAnalyzer 含む）
 
 FROM debian:bullseye-slim
 
@@ -29,6 +29,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       openjdk-11-jre-headless \
       python3 \
+      python3-pip \
+      python3-numpy \
+      python3-opencv \
       ffmpeg \
       curl \
       unzip \
@@ -37,6 +40,8 @@ RUN apt-get update && \
       ca-certificates \
       gnupg \
     && \
+    # Python パッケージ（ChewingAnalyzer 用）
+    pip3 install --no-cache-dir boto3 && \
     # Node.js 22 LTS (NodeSource)
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
@@ -48,7 +53,7 @@ RUN apt-get update && \
     /modify-sudoers.sh && \
     # Cleanup
     rm -f /tmp/gg.zip && \
-    apt-get purge -y --auto-remove gnupg unzip && \
+    apt-get purge -y --auto-remove gnupg unzip python3-pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.npm
 
