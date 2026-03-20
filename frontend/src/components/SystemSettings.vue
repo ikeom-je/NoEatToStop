@@ -164,6 +164,19 @@ async function handleSave() {
             @input="settingsStore.updateField('videoRetentionDays', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
+        <div>
+          <label class="label-text">咀嚼状態データ保管期間 (日)</label>
+          <input
+            type="number"
+            min="1"
+            max="365"
+            :value="settingsStore.config.chewingStateRetentionDays"
+            class="input-field"
+            data-testid="chewing-state-retention"
+            @input="settingsStore.updateField('chewingStateRetentionDays', Number(($event.target as HTMLInputElement).value))"
+          />
+          <p class="text-xs text-gray-400 mt-1">DynamoDB TTL で自動削除（デフォルト: 7日）</p>
+        </div>
       </div>
     </div>
 

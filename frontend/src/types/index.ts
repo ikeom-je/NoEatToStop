@@ -62,6 +62,7 @@ export interface SystemConfiguration {
   tvControlMethod: 'smart_tv_api' | 'alexa_voice' | 'mock';
   tvControlRetryCount: number;
   tvControlRetryInterval: number;
+  chewingStateRetentionDays: number;
 }
 
 export const DEFAULT_SYSTEM_CONFIGURATION: SystemConfiguration = {
@@ -81,6 +82,7 @@ export const DEFAULT_SYSTEM_CONFIGURATION: SystemConfiguration = {
   tvControlMethod: 'smart_tv_api',
   tvControlRetryCount: 1,
   tvControlRetryInterval: 3,
+  chewingStateRetentionDays: 7,
 };
 
 export interface TVControlRecord {
