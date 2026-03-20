@@ -22,6 +22,7 @@ export class NoEatToStopStack extends cdk.Stack {
   public readonly mealSessionsTable: dynamodb.Table;
   public readonly eatingStatesTable: dynamodb.Table;
   public readonly systemSettingsTable: dynamodb.Table;
+  public readonly chewingStatesTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
   public readonly distribution: cloudfront.Distribution;
 
@@ -90,6 +91,15 @@ export class NoEatToStopStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    this.chewingStatesTable = new dynamodb.Table(this, 'ChewingStatesTable', {
+      tableName: `ChewingStates-${stage}`,
+      partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'epochSeconds', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'expiresAt',
+    });
+
     // ========================================
     // IAM Roles
     // ========================================
@@ -149,6 +159,7 @@ export class NoEatToStopStack extends cdk.Stack {
         this.mealSessionsTable.tableArn,
         this.eatingStatesTable.tableArn,
         this.systemSettingsTable.tableArn,
+        this.chewingStatesTable.tableArn,
       ],
     }));
 
@@ -419,6 +430,49 @@ export class NoEatToStopStack extends cdk.Stack {
     });
 
     // ========================================
+    // IoT Topic Rule → Lambda → DynamoDB
+    // ========================================
+
+    const chewingStateHandlerFn = new lambda.Function(this, 'ChewingStateHandler', {
+      functionName: `noeatstop-chewing-state-handler-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.handleChewingState',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        CHEWING_STATES_TABLE: this.chewingStatesTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    // IoT Rule が Lambda を呼び出す権限
+    chewingStateHandlerFn.addPermission('IoTRuleInvoke', {
+      principal: new iam.ServicePrincipal('iot.amazonaws.com'),
+      sourceArn: `arn:aws:iot:${this.region}:${this.account}:rule/noeatstop_chewing_state_${stage}`,
+    });
+
+    new iot.CfnTopicRule(this, 'ChewingStateRule', {
+      ruleName: `noeatstop_chewing_state_${stage}`,
+      topicRulePayload: {
+        sql: "SELECT * FROM 'noeatstop/+/chewing-state'",
+        awsIotSqlVersion: '2016-03-23',
+        actions: [
+          {
+            lambda: {
+              functionArn: chewingStateHandlerFn.functionArn,
+            },
+          },
+        ],
+        ruleDisabled: false,
+        description: 'ChewingAnalyzer の状態変化を DynamoDB に保存',
+      },
+    });
+
+    // ========================================
     // Monitoring & Analytics
     // ========================================
 
@@ -633,6 +687,11 @@ export class NoEatToStopStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'SystemSettingsTableName', {
       value: this.systemSettingsTable.tableName,
       description: 'SystemSettings DynamoDB table name',
+    });
+
+    new cdk.CfnOutput(this, 'ChewingStatesTableName', {
+      value: this.chewingStatesTable.tableName,
+      description: 'ChewingStates DynamoDB table name (TTL enabled)',
     });
   }
 }
