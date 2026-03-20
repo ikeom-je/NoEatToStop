@@ -1,5 +1,5 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -145,6 +145,41 @@ export async function getLatestAnalyzedFrame(): Promise<APIGatewayProxyResult> {
     const url = await getSignedUrl(s3Client, command, { expiresIn: 60 });
 
     return response(200, { url });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+export async function getChewingStates(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.CHEWING_STATES_TABLE;
+    if (!tableName) return response(500, { error: 'CHEWING_STATES_TABLE not configured' });
+
+    const deviceId = event.queryStringParameters?.deviceId || 'noeatstop-edge-device';
+    const limit = Math.min(Number(event.queryStringParameters?.limit) || 50, 200);
+
+    const result = await ddbClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'deviceId = :d',
+      ExpressionAttributeValues: { ':d': { S: deviceId } },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+
+    const items = (result.Items || []).map(item => ({
+      deviceId: item.deviceId?.S,
+      epochSeconds: Number(item.epochSeconds?.N),
+      state: item.state?.S,
+      prevState: item.prevState?.S,
+      motionScore: Number(item.motionScore?.N),
+      facesDetected: Number(item.facesDetected?.N),
+      stoppedDuration: Number(item.stoppedDuration?.N),
+      frameCount: Number(item.frameCount?.N),
+      timestamp: item.timestamp?.S,
+      expiresAt: Number(item.expiresAt?.N),
+    }));
+
+    return response(200, { items, count: items.length });
   } catch (err) {
     return response(500, { error: (err as Error).message });
   }

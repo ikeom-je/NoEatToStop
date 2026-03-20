@@ -360,6 +360,25 @@ export class NoEatToStopStack extends cdk.Stack {
     const latestAnalyzedFrameResource = videoResource.addResource('latest-analyzed-frame');
     latestAnalyzedFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestAnalyzedFrameFn));
 
+    const getChewingStatesFn = new lambda.Function(this, 'GetChewingStatesHandler', {
+      functionName: `noeatstop-get-chewing-states-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getChewingStates',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        CHEWING_STATES_TABLE: this.chewingStatesTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const chewingStatesResource = this.api.root.addResource('chewing-states');
+    chewingStatesResource.addMethod('GET', new apigateway.LambdaIntegration(getChewingStatesFn));
+
     // ========================================
     // CloudFront Distribution
     // ========================================
