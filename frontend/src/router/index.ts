@@ -38,6 +38,11 @@ const router = createRouter({
       name: 'error-analysis',
       component: () => import('@/components/ErrorAnalysis.vue'),
     },
+    {
+      path: '/chewing-states',
+      name: 'chewing-states',
+      component: () => import('@/components/ChewingStates.vue'),
+    },
   ],
 });
 

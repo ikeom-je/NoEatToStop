@@ -69,6 +69,29 @@ export const tvControlApi = {
   },
 };
 
+export interface ChewingStateRecord {
+  deviceId: string;
+  epochSeconds: number;
+  state: string;
+  prevState: string;
+  motionScore: number;
+  facesDetected: number;
+  stoppedDuration: number;
+  frameCount: number;
+  timestamp: string;
+  expiresAt: number;
+}
+
+export const chewingStatesApi = {
+  async getRecent(deviceId?: string, limit?: number): Promise<ChewingStateRecord[]> {
+    const params = new URLSearchParams();
+    if (deviceId) params.set('deviceId', deviceId);
+    if (limit) params.set('limit', String(limit));
+    const { data } = await apiClient.get<{ items: ChewingStateRecord[] }>(`/chewing-states?${params}`);
+    return data.items;
+  },
+};
+
 export const videoApi = {
   async getLatestFrameUrl(): Promise<string> {
     const { data } = await apiClient.get<{ url: string }>('/video/latest-frame');

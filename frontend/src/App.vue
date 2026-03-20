@@ -9,6 +9,7 @@ const navItems = [
   { path: '/meal-history', label: '食事履歴' },
   { path: '/settings', label: 'システム設定' },
   { path: '/tv-control', label: 'TV制御' },
+  { path: '/chewing-states', label: '咀嚼状態' },
   { path: '/error-analysis', label: 'エラー分析' },
   { path: '/emergency', label: '緊急制御' },
 ];
