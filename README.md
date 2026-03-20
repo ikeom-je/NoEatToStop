@@ -24,20 +24,25 @@ frame-capture (Docker) ── ffmpeg で 1 フレーム取得 ──→ S3 (live
 
 ### Raspberry Pi 本番環境
 
-Greengrass Core 単一コンテナ内で FrameCapture プロセスを統合実行し、IoT Core (MQTT) でクラウドと双方向通信する。
+Greengrass Core 単一コンテナ内で FrameCapture + ChewingAnalyzer を統合実行し、IoT Core (MQTT) でクラウドと双方向通信する。
 
 ```
 IP Camera (RTSP) または USB Camera
   ↓ RTSP（直接 or MediaMTX 経由）
 Greengrass Core (Docker)
   ├── FrameCapture ── ffmpeg で 1 フレーム取得 ──→ S3 (live-frames/latest.jpg)
+  │        └── /tmp/frame.jpg
+  ├── ChewingAnalyzer ── 顔検出 + 咀嚼判定 ──→ S3 (live-frames/latest-analyzed.jpg)
+  │        └── OpenCV Haar Cascade → 口領域差分 → 状態判定
   │                                                     ↓
   └── IoT Core MQTT ←──→ AWS IoT Core           Lambda (presigned URL)
                                                         ↓
                                               管理画面 (Vue.js / CloudFront)
+                                              ├── 生フレーム表示
+                                              └── 検出BB付きフレーム表示（切替可）
 ```
 
-**用途**: 本番稼働。映像キャプチャ + IoT Greengrass による Edge-Cloud 連携（単一コンテナ）
+**用途**: 本番稼働。映像キャプチャ + 咀嚼検出 + IoT Greengrass による Edge-Cloud 連携（単一コンテナ）
 
 ### Mac と RPi の主な違い
 
@@ -45,12 +50,12 @@ Greengrass Core (Docker)
 |------|-------------|---------------------|
 | **目的** | パイプライン開発・UI 動作確認 | 本番稼働 |
 | **Docker コンテナ** | mediamtx + frame-capture-dev | greengrass-core（FrameCapture 統合） |
-| **Greengrass Core** | 不使用 | FrameCapture 統合 + IoT Core MQTT |
+| **Greengrass Core** | 不使用 | FrameCapture + ChewingAnalyzer 統合 + IoT Core MQTT |
 | **カメラドライバ** | avfoundation (Mac 内蔵カメラ) | v4l2 (USB) または RTSP (IP カメラ) |
 | **RTSP 取得** | 常に MediaMTX 経由 | MediaMTX 経由 or IP カメラ直接接続 |
 | **Docker ランタイム** | Colima (または Docker Desktop) | Docker Engine |
 | **カメラ配信スクリプト** | `start-camera.sh` | `start-camera-rpi.sh` (USB) / 不要 (IP カメラ) |
-| **E2E テスト** | ― | `e2e-test.sh`（GG + IoT Core + S3 検証） |
+| **E2E テスト** | ― | `e2e-test.sh`（10項目: GG + IoT Core + S3 + ChewingAnalyzer 検証） |
 | **OS / Arch** | macOS (x86_64 / arm64) | Raspberry Pi OS 64-bit (aarch64) |
 
 ## 技術スタック
@@ -61,7 +66,7 @@ Greengrass Core (Docker)
 - **フロントエンド**: Vue.js v3 + Tailwind CSS
 - **データベース**: Amazon DynamoDB
 - **映像処理**: Amazon Kinesis Video Streams, Rekognition, Bedrock
-- **Edge**: AWS IoT Greengrass V2 (Docker、Node.js 22 + ffmpeg 統合)
+- **Edge**: AWS IoT Greengrass V2 (Docker、Node.js 22 + Python 3.9 + OpenCV + ffmpeg 統合)
 - **Docker ランタイム**: Colima (Mac) / Docker Engine (RPi)
 
 ## 前提条件
@@ -160,7 +165,7 @@ no-eat-to-stop-system/
 - **IAM Roles**: Least-privilege access for edge devices and Lambda functions
 
 ### Edge Layer (`edge/`)
-- **Greengrass Core** (RPi): FrameCapture プロセスを統合した単一コンテナ。Node.js 22 + ffmpeg で RTSP → S3 フレームキャプチャ + IoT Core MQTT 通信
+- **Greengrass Core** (RPi): FrameCapture + ChewingAnalyzer を統合した単一コンテナ。Node.js 22 + ffmpeg でフレームキャプチャ、Python 3.9 + OpenCV で顔検出・咀嚼判定 + IoT Core MQTT 通信
 - **MediaMTX**: RTSP リレーサーバー。USB カメラ / Mac カメラ使用時のみ必要
 - **frame-capture-dev** (Mac 開発のみ): Greengrass が動作しない Mac 用の独立コンテナ（`--profile dev`）
 - **AI Integration**: Amazon Bedrock (Claude) による咀嚼行動分析（クラウド側 Lambda で実行）
