@@ -5,13 +5,14 @@ FrameCapture が書き出す JPEG フレームを監視し、
 OpenCV Haar Cascade で顔検出 → 口領域の差分量で咀嚼判定を行う。
 状態変化時にエビデンス画像を S3 にアップロードする。
 
-MQTT 通知は別ブランチ (feat/edge/mqtt) で実装予定。
+MQTT 通知・TV 制御コマンド連携を含む。
 """
 
 import os
 import sys
 import time
 import json
+import uuid
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,9 @@ MQTT_TOPIC = f"noeatstop/{THING_NAME}/chewing-state"
 
 # ポーリング間隔（FrameCapture の CAPTURE_INTERVAL に合わせる）
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "0.5"))
+
+# デバイス制御 IPC ファイルパス
+DEVICE_COMMAND_FILE = os.environ.get("DEVICE_COMMAND_FILE", "/tmp/device_command.json")
 
 
 class ChewingAnalyzer:
@@ -91,6 +95,7 @@ class ChewingAnalyzer:
         self.chewing_stopped_since = None
         self.frame_count = 0
         self.last_mtime = 0.0
+        self.tv_off_sent = False  # TV OFF コマンド送信済みフラグ
 
         log.info(
             "ChewingAnalyzer 初期化完了: threshold=%.0f, scale=%.1f, "
@@ -256,6 +261,19 @@ class ChewingAnalyzer:
                     frame, faces, "tv_off_trigger", motion_score
                 )
 
+        # TV 制御コマンドの書き出し
+        if new_state == self.STATE_STOPPED and stopped_duration >= PAUSE_THRESHOLD:
+            if not self.tv_off_sent:
+                self._send_device_command("turn_off", f"chewing_stopped_{int(stopped_duration)}s")
+                self.tv_off_sent = True
+        elif new_state == self.STATE_CHEWING and self.tv_off_sent:
+            self._send_device_command("turn_on", "chewing_resumed")
+            self.tv_off_sent = False
+        elif new_state == self.STATE_ENDED and self.tv_off_sent:
+            # 食事終了時は TV ON に戻す
+            self._send_device_command("turn_on", "meal_ended")
+            self.tv_off_sent = False
+
         self.current_state = new_state
 
         # 定期ログ（10フレームごと）
@@ -267,6 +285,21 @@ class ChewingAnalyzer:
                 len(faces),
                 self.frame_count,
             )
+
+    def _send_device_command(self, action: str, reason: str):
+        """DeviceController へ制御コマンドを書き出し（ファイル IPC）"""
+        cmd = {
+            "action": action,
+            "reason": reason,
+            "requestId": str(uuid.uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            with open(DEVICE_COMMAND_FILE, "w") as f:
+                json.dump(cmd, f)
+            log.info("デバイスコマンド送信: action=%s, reason=%s", action, reason)
+        except IOError:
+            log.exception("デバイスコマンド書き込み失敗")
 
     def _publish_state(
         self,

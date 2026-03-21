@@ -123,6 +123,32 @@ else
   fail "MQTT 送信ログが見つかりません"
 fi
 
+# 12. DeviceController プロセス稼働確認
+echo "[12] DeviceController プロセス稼働確認"
+if docker exec noeatstop-gg-core sh -c 'cat /proc/*/cmdline 2>/dev/null | tr "\0" "\n" | grep -q "controller.py"'; then
+  pass "DeviceController プロセスが Greengrass コンテナ内で稼働中"
+else
+  fail "DeviceController プロセスが見つかりません"
+fi
+
+# 13. DeviceController 初期化ログ確認
+echo "[13] DeviceController 初期化ログ確認"
+if docker logs noeatstop-gg-core 2>&1 | grep -q "DeviceController 初期化完了"; then
+  pass "DeviceController が正常に初期化済み"
+else
+  fail "DeviceController 初期化ログが見つかりません"
+fi
+
+# 14. TV 制御イベント API 確認
+echo "[14] TV 制御イベント API 確認"
+API_URL="${API_URL:-https://ex7hkp29hg.execute-api.ap-northeast-1.amazonaws.com/prod}"
+TV_RESP=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/tv-control/events" 2>/dev/null)
+if [ "$TV_RESP" = "200" ]; then
+  pass "TV 制御イベント API 正常応答 (200)"
+else
+  fail "TV 制御イベント API エラー (HTTP $TV_RESP)"
+fi
+
 # 結果サマリー
 echo ""
 echo "=== テスト結果 ==="

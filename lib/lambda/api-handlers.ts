@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, PutItemCommand, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MealSessionRepository } from '../repositories/meal-session-repository';
 import { EatingStateRepository } from '../repositories/eating-state-repository';
@@ -227,4 +227,114 @@ export async function handleChewingState(event: Record<string, unknown>): Promis
   }));
 
   console.log(`ChewingState saved: ${event.state} (device=${event.deviceId}, ttl=${retentionDays}d)`);
+}
+
+/**
+ * IoT Rule から呼び出される Lambda ハンドラー
+ * TV 制御イベントを TVControlEvents DynamoDB テーブルに保存
+ */
+export async function handleTVControlEvent(event: Record<string, unknown>): Promise<void> {
+  const tableName = process.env.TV_CONTROL_EVENTS_TABLE;
+  if (!tableName) {
+    console.error('TV_CONTROL_EVENTS_TABLE not configured');
+    return;
+  }
+
+  const epochSeconds = typeof event.epochSeconds === 'number' ? event.epochSeconds : Math.floor(Date.now() / 1000);
+  const expiresAt = epochSeconds + 30 * 86400; // 30日保持
+
+  const item: Record<string, { S: string } | { N: string }> = {
+    deviceId: { S: String(event.deviceId || 'unknown') },
+    epochSeconds: { N: String(epochSeconds) },
+    action: { S: String(event.action || '') },
+    reason: { S: String(event.reason || '') },
+    source: { S: String(event.source || 'edge') },
+    success: { S: String(event.success ?? true) },
+    method: { S: String(event.method || 'mock') },
+    error: { S: String(event.error || '') },
+    tvPower: { S: String(event.tvPower || '') },
+    timestamp: { S: String(event.timestamp || new Date().toISOString()) },
+    expiresAt: { N: String(expiresAt) },
+  };
+
+  await ddbClient.send(new PutItemCommand({
+    TableName: tableName,
+    Item: item,
+  }));
+
+  console.log(`TVControlEvent saved: ${event.action} (device=${event.deviceId}, source=${event.source})`);
+}
+
+/**
+ * GET /tv-control/events — TV 制御イベント履歴を取得
+ */
+export async function getTVControlEvents(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.TV_CONTROL_EVENTS_TABLE;
+    if (!tableName) return response(500, { error: 'TV_CONTROL_EVENTS_TABLE not configured' });
+
+    const deviceId = event.queryStringParameters?.deviceId || 'noeatstop-edge-device';
+    const limit = Math.min(Number(event.queryStringParameters?.limit) || 50, 200);
+
+    const result = await ddbClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'deviceId = :d',
+      ExpressionAttributeValues: { ':d': { S: deviceId } },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+
+    const items = (result.Items || []).map(item => ({
+      deviceId: item.deviceId?.S,
+      epochSeconds: Number(item.epochSeconds?.N),
+      action: item.action?.S,
+      reason: item.reason?.S,
+      source: item.source?.S,
+      success: item.success?.S === 'true',
+      method: item.method?.S,
+      error: item.error?.S || undefined,
+      tvPower: item.tvPower?.S,
+      timestamp: item.timestamp?.S,
+    }));
+
+    return response(200, { items, count: items.length });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /tv-control/command — 管理画面から TV 制御コマンドを送信
+ * S3 にコマンドファイルを書き出し → Edge の DeviceController がポーリングで取得
+ */
+export async function sendTVCommand(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const body = JSON.parse(event.body || '{}');
+    const action = body.action;
+    if (!action || !['turn_on', 'turn_off'].includes(action)) {
+      return response(400, { error: 'action must be turn_on or turn_off' });
+    }
+
+    const deviceId = body.deviceId || 'noeatstop-edge-device';
+    const bucket = process.env.VIDEO_BUCKET;
+    if (!bucket) return response(500, { error: 'VIDEO_BUCKET not configured' });
+
+    const command = {
+      action,
+      reason: 'management_console',
+      requestId: `console-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    await s3Client.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: `commands/${deviceId}/tv.json`,
+      Body: JSON.stringify(command),
+      ContentType: 'application/json',
+    }));
+
+    return response(200, { message: 'Command sent', command });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
 }

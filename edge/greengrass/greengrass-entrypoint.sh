@@ -103,6 +103,7 @@ chmod +x $GGC_ROOT_PATH/alts/current/distro/bin/loader
 COMPONENTS_SRC=/opt/greengrass-components
 FRAME_CAPTURE_WORK=/opt/frame-capture
 CHEWING_ANALYZER_WORK=/opt/chewing-analyzer
+DEVICE_CONTROLLER_WORK=/opt/device-controller
 
 setup_frame_capture() {
   echo "Setting up FrameCapture..."
@@ -191,9 +192,45 @@ run_chewing_analyzer() {
   echo "ChewingAnalyzer started (PID: ${CHEWING_ANALYZER_PID})"
 }
 
+# --- DeviceController コンポーネントの準備 ---
+setup_device_controller() {
+  echo "Setting up DeviceController..."
+
+  CONTROLLER_SRC="${COMPONENTS_SRC}/com.noeatstop.DeviceController/artifacts"
+  if [ ! -d "${CONTROLLER_SRC}" ]; then
+    echo "WARNING: DeviceController artifacts not found at ${CONTROLLER_SRC}"
+    return 1
+  fi
+
+  mkdir -p "${DEVICE_CONTROLLER_WORK}"
+  cp -r "${CONTROLLER_SRC}/"* "${DEVICE_CONTROLLER_WORK}/"
+
+  echo "DeviceController ready at ${DEVICE_CONTROLLER_WORK}"
+}
+
+# DeviceController プロセスをバックグラウンドで起動
+run_device_controller() {
+  if [ ! -f "${DEVICE_CONTROLLER_WORK}/controller.py" ]; then
+    echo "WARNING: controller.py not found. DeviceController will not start."
+    return
+  fi
+
+  echo "Starting DeviceController process..."
+  export THING_NAME="${THING_NAME:-noeatstop-edge-device}"
+  export IOT_ENDPOINT="${IOT_ENDPOINT:-}"
+  export S3_BUCKET="${VIDEO_BUCKET}"
+  export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
+  export TV_CONTROL_METHOD="${TV_CONTROL_METHOD:-mock}"
+
+  cd "${DEVICE_CONTROLLER_WORK}" && python3 controller.py &
+  DEVICE_CONTROLLER_PID=$!
+  echo "DeviceController started (PID: ${DEVICE_CONTROLLER_PID})"
+}
+
 # コンポーネントの準備
 setup_frame_capture
 setup_chewing_analyzer
+setup_device_controller
 
 echo "Starting Greengrass..."
 
@@ -209,6 +246,10 @@ run_frame_capture
 echo "Waiting for first frame..."
 sleep 5
 run_chewing_analyzer
+
+# DeviceController 起動（ChewingAnalyzer の後）
+sleep 2
+run_device_controller
 
 # Greengrass プロセスを待機（メインプロセス）
 wait $GG_PID

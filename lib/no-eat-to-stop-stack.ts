@@ -23,6 +23,7 @@ export class NoEatToStopStack extends cdk.Stack {
   public readonly eatingStatesTable: dynamodb.Table;
   public readonly systemSettingsTable: dynamodb.Table;
   public readonly chewingStatesTable: dynamodb.Table;
+  public readonly tvControlEventsTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
   public readonly distribution: cloudfront.Distribution;
 
@@ -91,6 +92,15 @@ export class NoEatToStopStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    this.tvControlEventsTable = new dynamodb.Table(this, 'TVControlEventsTable', {
+      tableName: `TVControlEvents-${stage}`,
+      partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'epochSeconds', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'expiresAt',
+    });
+
     this.chewingStatesTable = new dynamodb.Table(this, 'ChewingStatesTable', {
       tableName: `ChewingStates-${stage}`,
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
@@ -136,6 +146,17 @@ export class NoEatToStopStack extends cdk.Stack {
       resources: [
         `${this.videoBucket.bucketArn}/daily/*`,
         `${this.videoBucket.bucketArn}/live-frames/*`,
+        `${this.videoBucket.bucketArn}/evidence/*`,
+      ],
+    }));
+
+    edgeDeviceRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        's3:GetObject',
+        's3:DeleteObject',
+      ],
+      resources: [
+        `${this.videoBucket.bucketArn}/commands/*`,
       ],
     }));
 
@@ -160,7 +181,15 @@ export class NoEatToStopStack extends cdk.Stack {
         this.eatingStatesTable.tableArn,
         this.systemSettingsTable.tableArn,
         this.chewingStatesTable.tableArn,
+        this.tvControlEventsTable.tableArn,
       ],
+    }));
+
+    lambdaExecutionRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'iot:Publish',
+      ],
+      resources: ['*'],
     }));
 
     lambdaExecutionRole.addToPolicy(new iam.PolicyStatement({
@@ -379,6 +408,45 @@ export class NoEatToStopStack extends cdk.Stack {
     const chewingStatesResource = this.api.root.addResource('chewing-states');
     chewingStatesResource.addMethod('GET', new apigateway.LambdaIntegration(getChewingStatesFn));
 
+    // TV Control Events API
+    const getTVControlEventsFn = new lambda.Function(this, 'GetTVControlEventsHandler', {
+      functionName: `noeatstop-get-tv-control-events-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getTVControlEvents',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        TV_CONTROL_EVENTS_TABLE: this.tvControlEventsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const sendTVCommandFn = new lambda.Function(this, 'SendTVCommandHandler', {
+      functionName: `noeatstop-send-tv-command-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.sendTVCommand',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        TV_CONTROL_EVENTS_TABLE: this.tvControlEventsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    // tv-control リソースの再構成（既存の session ベースを events ベースに変更）
+    const tvControlEventsResource = tvControlResource.addResource('events');
+    tvControlEventsResource.addMethod('GET', new apigateway.LambdaIntegration(getTVControlEventsFn));
+    const tvControlCommandResource = tvControlResource.addResource('command');
+    tvControlCommandResource.addMethod('POST', new apigateway.LambdaIntegration(sendTVCommandFn));
+
     // ========================================
     // CloudFront Distribution
     // ========================================
@@ -488,6 +556,48 @@ export class NoEatToStopStack extends cdk.Stack {
         ],
         ruleDisabled: false,
         description: 'ChewingAnalyzer の状態変化を DynamoDB に保存',
+      },
+    });
+
+    // ========================================
+    // IoT Topic Rule → Lambda → DynamoDB (TV Control Events)
+    // ========================================
+
+    const tvControlHandlerFn = new lambda.Function(this, 'TVControlEventHandler', {
+      functionName: `noeatstop-tv-control-handler-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.handleTVControlEvent',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        TV_CONTROL_EVENTS_TABLE: this.tvControlEventsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    tvControlHandlerFn.addPermission('IoTRuleInvokeTVControl', {
+      principal: new iam.ServicePrincipal('iot.amazonaws.com'),
+      sourceArn: `arn:aws:iot:${this.region}:${this.account}:rule/noeatstop_tv_control_${stage}`,
+    });
+
+    new iot.CfnTopicRule(this, 'TVControlRule', {
+      ruleName: `noeatstop_tv_control_${stage}`,
+      topicRulePayload: {
+        sql: "SELECT * FROM 'noeatstop/+/tv-control'",
+        awsIotSqlVersion: '2016-03-23',
+        actions: [
+          {
+            lambda: {
+              functionArn: tvControlHandlerFn.functionArn,
+            },
+          },
+        ],
+        ruleDisabled: false,
+        description: 'DeviceController の TV 制御イベントを DynamoDB に保存',
       },
     });
 
@@ -711,6 +821,11 @@ export class NoEatToStopStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ChewingStatesTableName', {
       value: this.chewingStatesTable.tableName,
       description: 'ChewingStates DynamoDB table name (TTL enabled)',
+    });
+
+    new cdk.CfnOutput(this, 'TVControlEventsTableName', {
+      value: this.tvControlEventsTable.tableName,
+      description: 'TVControlEvents DynamoDB table name (TTL enabled)',
     });
   }
 }
