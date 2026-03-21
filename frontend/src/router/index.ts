@@ -1,8 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '@/stores/authStore';
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/callback',
+      name: 'callback',
+      component: () => import('@/components/AuthCallback.vue'),
+      meta: { requiresAuth: false },
+    },
     {
       path: '/',
       name: 'dashboard',
@@ -44,6 +51,17 @@ const router = createRouter({
       component: () => import('@/components/ChewingStates.vue'),
     },
   ],
+});
+
+router.beforeEach((to) => {
+  if (to.meta.requiresAuth === false) return true;
+
+  const authStore = useAuthStore();
+  if (!authStore.authenticated) {
+    authStore.login();
+    return false;
+  }
+  return true;
 });
 
 export default router;
