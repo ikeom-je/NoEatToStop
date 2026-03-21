@@ -65,6 +65,7 @@ onMounted(() => {
             <th class="px-3 py-2 text-left">時刻</th>
             <th class="px-3 py-2 text-left">状態変化</th>
             <th class="px-3 py-2 text-right">Motion</th>
+            <th class="px-3 py-2 text-right">精度</th>
             <th class="px-3 py-2 text-right">顔数</th>
             <th class="px-3 py-2 text-right">停止秒</th>
           </tr>
@@ -83,6 +84,14 @@ onMounted(() => {
               </span>
             </td>
             <td class="px-3 py-2 text-right font-mono">{{ r.motionScore }}</td>
+            <td class="px-3 py-2 text-right">
+              <span
+                class="inline-block px-1.5 py-0.5 rounded text-xs"
+                :class="r.confidence >= 0.5 ? 'bg-green-100 text-green-700' : r.confidence > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+              >
+                {{ r.confidence ? r.confidence.toFixed(2) : '-' }}
+              </span>
+            </td>
             <td class="px-3 py-2 text-right">{{ r.facesDetected }}</td>
             <td class="px-3 py-2 text-right">{{ r.stoppedDuration > 0 ? r.stoppedDuration.toFixed(1) : '-' }}</td>
           </tr>

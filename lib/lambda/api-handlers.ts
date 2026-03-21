@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient, PutItemCommand, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MealSessionRepository } from '../repositories/meal-session-repository';
 import { EatingStateRepository } from '../repositories/eating-state-repository';
@@ -217,6 +217,7 @@ export async function handleChewingState(event: Record<string, unknown>): Promis
     facesDetected: { N: String(event.facesDetected ?? 0) },
     stoppedDuration: { N: String(event.stoppedDuration ?? 0) },
     frameCount: { N: String(event.frameCount ?? 0) },
+    confidence: { N: String(event.confidence ?? 0) },
     timestamp: { S: String(event.timestamp || new Date().toISOString()) },
     expiresAt: { N: String(expiresAt) },
   };
@@ -226,7 +227,7 @@ export async function handleChewingState(event: Record<string, unknown>): Promis
     Item: item,
   }));
 
-  console.log(`ChewingState saved: ${event.state} (device=${event.deviceId}, ttl=${retentionDays}d)`);
+  console.log(`ChewingState saved: ${event.state} (device=${event.deviceId}, confidence=${event.confidence}, ttl=${retentionDays}d)`);
 }
 
 /**
@@ -334,6 +335,130 @@ export async function sendTVCommand(event: APIGatewayProxyEvent): Promise<APIGat
     }));
 
     return response(200, { message: 'Command sent', command });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+/**
+ * S3 Event Notification から呼び出される Lambda ハンドラー
+ * frames/ にアップロードされたフレームのメタデータを FrameHistory テーブルに保存
+ */
+export async function handleFrameUpload(event: { Records: Array<{ s3: { bucket: { name: string }; object: { key: string; size: number } }; eventTime: string }> }): Promise<void> {
+  const tableName = process.env.FRAME_HISTORY_TABLE;
+  if (!tableName) {
+    console.error('FRAME_HISTORY_TABLE not configured');
+    return;
+  }
+
+  for (const record of event.Records) {
+    const bucket = record.s3.bucket.name;
+    const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
+
+    // frames/{deviceId}/{date}/{epochMs}.jpg からメタデータを抽出
+    const parts = key.split('/');
+    if (parts.length < 4) continue;
+
+    const deviceId = parts[1];
+    const fileName = parts[parts.length - 1];
+    const epochMs = parseInt(fileName.replace('.jpg', ''), 10);
+    if (isNaN(epochMs)) continue;
+
+    // S3 オブジェクトのメタデータを取得
+    let metadata: Record<string, string> = {};
+    try {
+      const head = await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      metadata = head.Metadata || {};
+    } catch {
+      console.warn(`HeadObject failed for ${key}`);
+    }
+
+    const confidence = parseFloat(metadata['confidence'] || '0');
+    const state = metadata['state'] || '';
+    const motionScore = parseInt(metadata['motion_score'] || '0', 10);
+    const facesDetected = parseInt(metadata['faces_detected'] || '0', 10);
+    const frameCount = parseInt(metadata['frame_count'] || '0', 10);
+
+    // presigned URL を生成（1時間有効）
+    const presignedUrl = await getSignedUrl(
+      s3Client,
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+      { expiresIn: 3600 },
+    );
+
+    const expiresAt = Math.floor(epochMs / 1000) + 86400; // 1日後に TTL 削除
+
+    const item: Record<string, { S: string } | { N: string }> = {
+      deviceId: { S: deviceId },
+      epochMs: { N: String(epochMs) },
+      s3Key: { S: key },
+      s3Bucket: { S: bucket },
+      state: { S: state },
+      confidence: { N: String(confidence) },
+      motionScore: { N: String(motionScore) },
+      facesDetected: { N: String(facesDetected) },
+      frameCount: { N: String(frameCount) },
+      timestamp: { S: record.eventTime },
+      expiresAt: { N: String(expiresAt) },
+    };
+
+    await ddbClient.send(new PutItemCommand({
+      TableName: tableName,
+      Item: item,
+    }));
+
+    console.log(`FrameHistory saved: device=${deviceId}, confidence=${confidence}, state=${state}`);
+  }
+}
+
+/**
+ * GET /frame-history — フレーム履歴を取得（presigned URL 付き）
+ */
+export async function getFrameHistory(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.FRAME_HISTORY_TABLE;
+    if (!tableName) return response(500, { error: 'FRAME_HISTORY_TABLE not configured' });
+
+    const deviceId = event.queryStringParameters?.deviceId || 'noeatstop-edge-device';
+    const limit = Math.min(Number(event.queryStringParameters?.limit) || 100, 500);
+
+    const result = await ddbClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'deviceId = :d',
+      ExpressionAttributeValues: { ':d': { S: deviceId } },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+
+    const bucket = process.env.VIDEO_BUCKET;
+    const items = await Promise.all((result.Items || []).map(async (item) => {
+      const s3Key = item.s3Key?.S || '';
+      let frameUrl = '';
+      if (bucket && s3Key) {
+        try {
+          frameUrl = await getSignedUrl(
+            s3Client,
+            new GetObjectCommand({ Bucket: bucket, Key: s3Key }),
+            { expiresIn: 3600 },
+          );
+        } catch { /* presigned URL 生成失敗は無視 */ }
+      }
+
+      return {
+        deviceId: item.deviceId?.S,
+        epochMs: Number(item.epochMs?.N),
+        s3Key,
+        frameUrl,
+        state: item.state?.S,
+        confidence: Number(item.confidence?.N),
+        motionScore: Number(item.motionScore?.N),
+        facesDetected: Number(item.facesDetected?.N),
+        frameCount: Number(item.frameCount?.N),
+        timestamp: item.timestamp?.S,
+      };
+    }));
+
+    return response(200, { items, count: items.length });
   } catch (err) {
     return response(500, { error: (err as Error).message });
   }
