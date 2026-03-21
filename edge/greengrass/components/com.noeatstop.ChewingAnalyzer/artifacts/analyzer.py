@@ -152,11 +152,15 @@ class ChewingAnalyzer:
             minSize=(60, 60),
         )
 
+        frame_h, frame_w = frame.shape[:2]
+
         if len(faces) == 0:
             new_state = self.STATE_ENDED
             motion_score = 0.0
-            self._update_state(new_state, motion_score, frame, faces)
-            self._upload_analyzed_frame(frame, faces, new_state, motion_score)
+            confidence = 0.0
+            self._update_state(new_state, motion_score, frame, faces, confidence)
+            self._upload_analyzed_frame(frame, faces, new_state, motion_score, confidence)
+            self._upload_frame_history(frame, new_state, motion_score, len(faces), confidence)
             self.prev_mouth_roi = None
             return
 
@@ -181,8 +185,14 @@ class ChewingAnalyzer:
         else:
             new_state = self.STATE_STOPPED
 
-        self._update_state(new_state, avg_motion, frame, faces)
-        self._upload_analyzed_frame(frame, faces, new_state, avg_motion)
+        # 精度（confidence）計算
+        confidence = self._calculate_confidence(
+            new_state, avg_motion, fw, fh, frame_w, frame_h
+        )
+
+        self._update_state(new_state, avg_motion, frame, faces, confidence)
+        self._upload_analyzed_frame(frame, faces, new_state, avg_motion, confidence)
+        self._upload_frame_history(frame, new_state, avg_motion, len(faces), confidence)
         self.prev_mouth_roi = mouth_roi.copy()
 
     def _calculate_motion(self, mouth_roi: np.ndarray) -> float:
@@ -205,12 +215,84 @@ class ChewingAnalyzer:
         diff = cv2.absdiff(prev_resized, curr_resized)
         return float(np.sum(diff))
 
+    def _calculate_confidence(
+        self,
+        state: str,
+        avg_motion: float,
+        face_w: int,
+        face_h: int,
+        frame_w: int,
+        frame_h: int,
+    ) -> float:
+        """エッジ分析の精度レベル（0.0〜1.0）を計算"""
+        # 顔サイズの信頼度（顔が大きいほど高精度）
+        face_area_ratio = (face_w * face_h) / max(frame_w * frame_h, 1)
+        face_confidence = min(face_area_ratio * 10, 0.4)  # 最大 0.4
+
+        # フレーム数の信頼度（分析フレームが多いほど安定）
+        frame_ratio = len(self.motion_history) / ANALYSIS_FRAME_COUNT
+        frame_confidence = min(frame_ratio * 0.2, 0.2)  # 最大 0.2
+
+        # 判定の確信度（閾値からの距離）
+        if CHEWING_MOTION_THRESHOLD > 0:
+            motion_ratio = avg_motion / CHEWING_MOTION_THRESHOLD
+            if state == self.STATE_CHEWING:
+                # 閾値を超えている量が多いほど確信度高
+                decision_confidence = min((motion_ratio - 1) * 0.5, 0.4)
+            else:
+                # 閾値を下回っている量が多いほど確信度高
+                decision_confidence = min((1 - motion_ratio) * 0.5, 0.4)
+            decision_confidence = max(decision_confidence, 0.0)
+        else:
+            decision_confidence = 0.0
+
+        return round(min(face_confidence + frame_confidence + decision_confidence, 1.0), 3)
+
+    def _upload_frame_history(
+        self,
+        frame: np.ndarray,
+        state: str,
+        motion_score: float,
+        faces_count: int,
+        confidence: float,
+    ):
+        """タイムスタンプ付きフレームを S3 frames/ にアップロード（フレーム履歴用）"""
+        if not self.s3 or not S3_BUCKET:
+            return
+
+        try:
+            now = datetime.now(timezone.utc)
+            date_str = now.strftime("%Y-%m-%d")
+            epoch_ms = int(now.timestamp() * 1000)
+            s3_key = f"frames/{THING_NAME}/{date_str}/{epoch_ms}.jpg"
+
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+
+            self.s3.put_object(
+                Bucket=S3_BUCKET,
+                Key=s3_key,
+                Body=buf.tobytes(),
+                ContentType="image/jpeg",
+                Metadata={
+                    "device_id": THING_NAME,
+                    "state": state,
+                    "confidence": str(confidence),
+                    "motion_score": str(int(motion_score)),
+                    "faces_detected": str(faces_count),
+                    "frame_count": str(self.frame_count),
+                    "epoch_ms": str(epoch_ms),
+                },
+            )
+        except Exception:
+            log.exception("フレーム履歴アップロード失敗")
+
     def _update_state(
         self,
         new_state: str,
         motion_score: float,
         frame: np.ndarray,
         faces: np.ndarray,
+        confidence: float = 0.0,
     ):
         """状態遷移の管理とエビデンスアップロード"""
         now = time.time()
@@ -235,7 +317,7 @@ class ChewingAnalyzer:
                 len(faces),
             )
             # MQTT 送信
-            self._publish_state(new_state, prev_state, motion_score, len(faces), stopped_duration)
+            self._publish_state(new_state, prev_state, motion_score, len(faces), stopped_duration, confidence)
             # エビデンスアップロード
             if EVIDENCE_ON_STATE_CHANGE and self.s3:
                 self._upload_evidence(frame, faces, new_state, motion_score)
@@ -308,6 +390,7 @@ class ChewingAnalyzer:
         motion_score: float,
         faces_count: int,
         stopped_duration: float,
+        confidence: float = 0.0,
     ):
         """状態変化を MQTT で送信"""
         if not self.iot_data:
@@ -321,6 +404,7 @@ class ChewingAnalyzer:
             "motionScore": int(motion_score),
             "facesDetected": faces_count,
             "stoppedDuration": round(stopped_duration, 1),
+            "confidence": confidence,
             "frameCount": self.frame_count,
             "timestamp": now.isoformat(),
             "epochSeconds": int(now.timestamp()),
@@ -342,6 +426,7 @@ class ChewingAnalyzer:
         faces: np.ndarray,
         state: str,
         motion_score: float,
+        confidence: float = 0.0,
     ):
         """バウンディングボックス付きフレームを S3 にアップロード（管理画面表示用）"""
         if not self.s3 or not S3_BUCKET:
@@ -366,9 +451,9 @@ class ChewingAnalyzer:
                 mouth_y = int(fy + fh * (1 - MOUTH_ROI_RATIO))
                 cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
 
-            # 状態とスコアのテキスト表示
-            label = f"{state} motion:{int(motion_score)}"
-            cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            # 状態とスコアとconfidenceのテキスト表示
+            label = f"{state} motion:{int(motion_score)} conf:{confidence:.2f}"
+            cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
             # JPEG エンコード
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])

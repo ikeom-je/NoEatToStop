@@ -103,6 +103,7 @@ export interface ChewingStateRecord {
   motionScore: number;
   facesDetected: number;
   stoppedDuration: number;
+  confidence: number;
   frameCount: number;
   timestamp: string;
   expiresAt: number;
@@ -114,6 +115,29 @@ export const chewingStatesApi = {
     if (deviceId) params.set('deviceId', deviceId);
     if (limit) params.set('limit', String(limit));
     const { data } = await apiClient.get<{ items: ChewingStateRecord[] }>(`/chewing-states?${params}`);
+    return data.items;
+  },
+};
+
+export interface FrameHistoryRecord {
+  deviceId: string;
+  epochMs: number;
+  s3Key: string;
+  frameUrl: string;
+  state: string;
+  confidence: number;
+  motionScore: number;
+  facesDetected: number;
+  frameCount: number;
+  timestamp: string;
+}
+
+export const frameHistoryApi = {
+  async getRecent(deviceId?: string, limit?: number): Promise<FrameHistoryRecord[]> {
+    const params = new URLSearchParams();
+    if (deviceId) params.set('deviceId', deviceId);
+    if (limit) params.set('limit', String(limit));
+    const { data } = await apiClient.get<{ items: FrameHistoryRecord[] }>(`/frame-history?${params}`);
     return data.items;
   },
 };

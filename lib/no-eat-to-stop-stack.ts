@@ -10,6 +10,7 @@ import * as iot from 'aws-cdk-lib/aws-iot';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import { Construct } from 'constructs';
 
 export interface NoEatToStopStackProps extends cdk.StackProps {
@@ -24,6 +25,7 @@ export class NoEatToStopStack extends cdk.Stack {
   public readonly systemSettingsTable: dynamodb.Table;
   public readonly chewingStatesTable: dynamodb.Table;
   public readonly tvControlEventsTable: dynamodb.Table;
+  public readonly frameHistoryTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
   public readonly distribution: cloudfront.Distribution;
 
@@ -51,6 +53,16 @@ export class NoEatToStopStack extends cdk.Stack {
         {
           id: 'DeleteLiveFrames',
           prefix: 'live-frames/',
+          expiration: cdk.Duration.days(1),
+        },
+        {
+          id: 'DeleteFrameHistory',
+          prefix: 'frames/',
+          expiration: cdk.Duration.days(1),
+        },
+        {
+          id: 'DeleteEvidence',
+          prefix: 'evidence/',
           expiration: cdk.Duration.days(1),
         },
       ],
@@ -96,6 +108,15 @@ export class NoEatToStopStack extends cdk.Stack {
       tableName: `TVControlEvents-${stage}`,
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'epochSeconds', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'expiresAt',
+    });
+
+    this.frameHistoryTable = new dynamodb.Table(this, 'FrameHistoryTable', {
+      tableName: `FrameHistory-${stage}`,
+      partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'epochMs', type: dynamodb.AttributeType.NUMBER },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       timeToLiveAttribute: 'expiresAt',
@@ -147,6 +168,7 @@ export class NoEatToStopStack extends cdk.Stack {
         `${this.videoBucket.bucketArn}/daily/*`,
         `${this.videoBucket.bucketArn}/live-frames/*`,
         `${this.videoBucket.bucketArn}/evidence/*`,
+        `${this.videoBucket.bucketArn}/frames/*`,
       ],
     }));
 
@@ -182,6 +204,7 @@ export class NoEatToStopStack extends cdk.Stack {
         this.systemSettingsTable.tableArn,
         this.chewingStatesTable.tableArn,
         this.tvControlEventsTable.tableArn,
+        this.frameHistoryTable.tableArn,
       ],
     }));
 
@@ -446,6 +469,52 @@ export class NoEatToStopStack extends cdk.Stack {
     tvControlEventsResource.addMethod('GET', new apigateway.LambdaIntegration(getTVControlEventsFn));
     const tvControlCommandResource = tvControlResource.addResource('command');
     tvControlCommandResource.addMethod('POST', new apigateway.LambdaIntegration(sendTVCommandFn));
+
+    // ========================================
+    // S3 Event Notification → Lambda → DynamoDB (Frame History)
+    // ========================================
+
+    const frameHistoryEnv = {
+      ...lambdaEnv,
+      FRAME_HISTORY_TABLE: this.frameHistoryTable.tableName,
+    };
+
+    const handleFrameUploadFn = new lambda.Function(this, 'HandleFrameUploadHandler', {
+      functionName: `noeatstop-handle-frame-upload-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.handleFrameUpload',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: frameHistoryEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    // S3 Event Notification: frames/ prefix にオブジェクトが作成されたら Lambda をトリガー
+    this.videoBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(handleFrameUploadFn),
+      { prefix: 'frames/' },
+    );
+
+    // Frame History API
+    const getFrameHistoryFn = new lambda.Function(this, 'GetFrameHistoryHandler', {
+      functionName: `noeatstop-get-frame-history-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getFrameHistory',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: frameHistoryEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const frameHistoryResource = this.api.root.addResource('frame-history');
+    frameHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(getFrameHistoryFn));
 
     // ========================================
     // CloudFront Distribution
@@ -826,6 +895,11 @@ export class NoEatToStopStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TVControlEventsTableName', {
       value: this.tvControlEventsTable.tableName,
       description: 'TVControlEvents DynamoDB table name (TTL enabled)',
+    });
+
+    new cdk.CfnOutput(this, 'FrameHistoryTableName', {
+      value: this.frameHistoryTable.tableName,
+      description: 'FrameHistory DynamoDB table name (TTL enabled)',
     });
   }
 }
