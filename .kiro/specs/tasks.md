@@ -122,11 +122,32 @@
     - Edge E2E テスト 12/12 PASS 確認（2026-03-20）
     - _Requirements: 2.1, 3.1, 3.2_
 
-  - [ ] 5.7 将来: TV 制御インターフェースモジュール
-    - TV 制御コンポーネント（Greengrass カスタムコンポーネント）
-    - ChewingAnalyzer からの IPC 連携
-    - IoT Core MQTT でのイベント通知
+  - [x] 5.7 DeviceController コンポーネント（TV 制御 Mock）
+    - DeviceController (controller.py): TV 制御ロジック（Mock）、リトライ、MQTT 通知
+    - ChewingAnalyzer → DeviceController ファイル IPC 連携
+    - 管理画面 → S3 コマンドファイル → DeviceController で Console → Edge 制御
+    - TVControlEvents DynamoDB テーブル + IoT Topic Rule パイプライン
+    - 管理画面: TV ON/OFF ボタン + イベント履歴表示
+    - Edge E2E テスト 18/18 PASS 確認（2026-03-21）
     - _Requirements: 1.3, 1.4, 6.4, 6.6, 8.1, 8.2, 8.3, 8.4_
+
+  - [x] 5.8 S3 Event Notification + フレーム履歴 + confidence
+    - ChewingAnalyzer に分析精度 (confidence) 計算を追加
+    - タイムスタンプ付きフレームを S3 `frames/` にアップロード（メタデータ付き）
+    - S3 Event Notification → Lambda → FrameHistory DynamoDB テーブル
+    - API GET `/frame-history` で presigned URL 付きフレーム履歴取得
+    - MQTT ペイロードに confidence 追加
+    - Edge E2E テスト 18/18 PASS 確認（2026-03-21）
+    - _Requirements: 2.1, 3.1, 3.6_
+
+  - [x] 5.9 咀嚼検出閾値チューニング + Human-in-the-loop ラベリング
+    - ChewingAnalyzer 動的パラメータリロード（設定ファイル監視）
+    - DeviceController paho-mqtt による MQTT Subscribe（設定 push + TV コマンド受信）
+    - 管理画面設定保存時に Lambda → MQTT push でEdgeに設定変更通知
+    - Labels DynamoDB テーブル（90日 TTL）+ API POST/GET `/labels`
+    - 管理画面: フレーム画像付きラベリングUI（OK / NG顔 / NG口 / NG咀嚼）
+    - Edge E2E テスト 18/18 PASS 確認（2026-03-21）
+    - _Requirements: 4.7, 7.3_
 
 - [ ] 6. Develop Vue.js web management interface
   - [x] 6.1 Set up Vue.js project with Tailwind CSS
