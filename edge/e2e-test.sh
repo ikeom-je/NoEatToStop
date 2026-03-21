@@ -149,6 +149,33 @@ else
   fail "TV 制御イベント API エラー (HTTP $TV_RESP)"
 fi
 
+# 15. S3 フレーム履歴アップロード確認
+echo "[15] S3 フレーム履歴アップロード確認"
+FRAME_COUNT=$(aws s3 ls "s3://$VIDEO_BUCKET/frames/" --recursive --region "$REGION" 2>/dev/null | wc -l)
+if [ "$FRAME_COUNT" -gt 0 ] 2>/dev/null; then
+  pass "S3 frames/ にフレーム履歴が存在 (${FRAME_COUNT} 枚)"
+else
+  fail "S3 frames/ にフレーム履歴が見つかりません"
+fi
+
+# 16. FrameHistory DynamoDB 確認
+echo "[16] FrameHistory DynamoDB レコード確認"
+FH_COUNT=$(aws dynamodb scan --table-name FrameHistory-dev --region "$REGION" --select COUNT --query 'Count' --output text 2>/dev/null || echo "0")
+if [ "$FH_COUNT" -gt 0 ] 2>/dev/null; then
+  pass "FrameHistory テーブルにレコード存在 (${FH_COUNT} 件)"
+else
+  fail "FrameHistory テーブルにレコードがありません"
+fi
+
+# 17. Frame History API 確認
+echo "[17] Frame History API 確認"
+FH_RESP=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/frame-history" 2>/dev/null)
+if [ "$FH_RESP" = "200" ]; then
+  pass "Frame History API 正常応答 (200)"
+else
+  fail "Frame History API エラー (HTTP $FH_RESP)"
+fi
+
 # 結果サマリー
 echo ""
 echo "=== テスト結果 ==="
