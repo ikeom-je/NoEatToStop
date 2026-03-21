@@ -57,7 +57,33 @@ export const settingsApi = {
   },
 };
 
+export interface TVControlEvent {
+  deviceId: string;
+  epochSeconds: number;
+  action: string;
+  reason: string;
+  source: string;
+  success: boolean;
+  method: string;
+  error?: string;
+  tvPower: string;
+  timestamp: string;
+}
+
 export const tvControlApi = {
+  async getEvents(deviceId?: string, limit?: number): Promise<TVControlEvent[]> {
+    const params = new URLSearchParams();
+    if (deviceId) params.set('deviceId', deviceId);
+    if (limit) params.set('limit', String(limit));
+    const { data } = await apiClient.get<{ items: TVControlEvent[] }>(`/tv-control/events?${params}`);
+    return data.items;
+  },
+
+  async sendCommand(action: 'turn_on' | 'turn_off', deviceId?: string): Promise<void> {
+    await apiClient.post('/tv-control/command', { action, deviceId });
+  },
+
+  // 旧API（後方互換）
   async getHistory(sessionId: string): Promise<TVControlRecord[]> {
     const { data } = await apiClient.get(`/tv-control/${sessionId}/history`);
     return data;
