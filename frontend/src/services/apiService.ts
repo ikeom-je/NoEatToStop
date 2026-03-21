@@ -142,6 +142,41 @@ export const frameHistoryApi = {
   },
 };
 
+export interface LabelRecord {
+  deviceId: string;
+  epochMs: number;
+  s3Key: string;
+  label: string;
+  state: string;
+  confidence: number;
+  motionScore: number;
+  facesDetected: number;
+  labeledAt: string;
+}
+
+export const labelsApi = {
+  async save(data: {
+    epochMs: number;
+    s3Key: string;
+    label: string;
+    state: string;
+    confidence: number;
+    motionScore: number;
+    facesDetected: number;
+    deviceId?: string;
+  }): Promise<void> {
+    await apiClient.post('/labels', data);
+  },
+
+  async getRecent(deviceId?: string, limit?: number): Promise<LabelRecord[]> {
+    const params = new URLSearchParams();
+    if (deviceId) params.set('deviceId', deviceId);
+    if (limit) params.set('limit', String(limit));
+    const { data } = await apiClient.get<{ items: LabelRecord[] }>(`/labels?${params}`);
+    return data.items;
+  },
+};
+
 export const videoApi = {
   async getLatestFrameUrl(): Promise<string> {
     const { data } = await apiClient.get<{ url: string }>('/video/latest-frame');

@@ -2,6 +2,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient, PutItemCommand, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { IoTDataPlaneClient, PublishCommand } from '@aws-sdk/client-iot-data-plane';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MealSessionRepository } from '../repositories/meal-session-repository';
 import { EatingStateRepository } from '../repositories/eating-state-repository';
@@ -11,6 +12,7 @@ import { MealStateManager } from '../services/meal-state-manager';
 const ddbClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(ddbClient);
 const s3Client = new S3Client({});
+const iotClient = new IoTDataPlaneClient({});
 
 const sessionRepo = new MealSessionRepository(docClient, process.env.MEAL_SESSIONS_TABLE!);
 const stateRepo = new EatingStateRepository(docClient, process.env.EATING_STATES_TABLE!);
@@ -105,6 +107,35 @@ export async function updateSetting(event: APIGatewayProxyEvent): Promise<APIGat
     if (!settingKey) return response(400, { error: 'settingKey is required' });
 
     const body = JSON.parse(event.body || '{}');
+
+    if (settingKey === 'all') {
+      // 全設定保存（SystemSettings.vue の saveAll）
+      await settingsRepo.saveConfiguration(body);
+
+      // Edge に設定変更を MQTT push
+      const analyzerSettings = {
+        chewingMotionThreshold: body.chewingDetectionThreshold ?? body.chewingMotionThreshold,
+        faceDetectionScale: body.faceDetectionThreshold,
+        mouthRoiRatio: body.mouthDetectionThreshold,
+        pauseThreshold: body.pauseThreshold,
+        analysisFrameCount: body.analysisFrameCount,
+      };
+
+      const deviceId = body.deviceId || 'noeatstop-edge-device';
+      try {
+        await iotClient.send(new PublishCommand({
+          topic: `noeatstop/${deviceId}/settings-update`,
+          qos: 1,
+          payload: Buffer.from(JSON.stringify(analyzerSettings)),
+        }));
+        console.log(`Settings MQTT push sent to ${deviceId}`);
+      } catch (mqttErr) {
+        console.warn('MQTT push failed (non-critical):', mqttErr);
+      }
+
+      return response(200, body);
+    }
+
     if (body.settingValue === undefined) {
       return response(400, { error: 'settingValue is required' });
     }
@@ -456,6 +487,78 @@ export async function getFrameHistory(event: APIGatewayProxyEvent): Promise<APIG
         frameCount: Number(item.frameCount?.N),
         timestamp: item.timestamp?.S,
       };
+    }));
+
+    return response(200, { items, count: items.length });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /labels — 検出画像に対するラベリングデータを保存
+ */
+export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.LABELS_TABLE;
+    if (!tableName) return response(500, { error: 'LABELS_TABLE not configured' });
+
+    const body = JSON.parse(event.body || '{}');
+    const { deviceId, epochMs, s3Key, label, state, confidence, motionScore, facesDetected } = body;
+
+    if (!epochMs || !label) {
+      return response(400, { error: 'epochMs and label are required' });
+    }
+
+    const item: Record<string, { S: string } | { N: string }> = {
+      deviceId: { S: String(deviceId || 'noeatstop-edge-device') },
+      epochMs: { N: String(epochMs) },
+      s3Key: { S: String(s3Key || '') },
+      label: { S: String(label) },
+      state: { S: String(state || '') },
+      confidence: { N: String(confidence ?? 0) },
+      motionScore: { N: String(motionScore ?? 0) },
+      facesDetected: { N: String(facesDetected ?? 0) },
+      labeledAt: { S: new Date().toISOString() },
+      expiresAt: { N: String(Math.floor(Date.now() / 1000) + 90 * 86400) },
+    };
+
+    await ddbClient.send(new PutItemCommand({ TableName: tableName, Item: item }));
+    return response(201, { message: 'Label saved', epochMs, label });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+/**
+ * GET /labels — ラベリングデータを取得
+ */
+export async function getLabels(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.LABELS_TABLE;
+    if (!tableName) return response(500, { error: 'LABELS_TABLE not configured' });
+
+    const deviceId = event.queryStringParameters?.deviceId || 'noeatstop-edge-device';
+    const limit = Math.min(Number(event.queryStringParameters?.limit) || 100, 500);
+
+    const result = await ddbClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'deviceId = :d',
+      ExpressionAttributeValues: { ':d': { S: deviceId } },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+
+    const items = (result.Items || []).map(item => ({
+      deviceId: item.deviceId?.S,
+      epochMs: Number(item.epochMs?.N),
+      s3Key: item.s3Key?.S,
+      label: item.label?.S,
+      state: item.state?.S,
+      confidence: Number(item.confidence?.N),
+      motionScore: Number(item.motionScore?.N),
+      facesDetected: Number(item.facesDetected?.N),
+      labeledAt: item.labeledAt?.S,
     }));
 
     return response(200, { items, count: items.length });
