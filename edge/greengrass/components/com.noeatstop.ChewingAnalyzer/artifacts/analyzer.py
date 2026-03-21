@@ -54,6 +54,10 @@ POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "0.5"))
 # デバイス制御 IPC ファイルパス
 DEVICE_COMMAND_FILE = os.environ.get("DEVICE_COMMAND_FILE", "/tmp/device_command.json")
 
+# 動的設定ファイル（DeviceController が MQTT 受信時に書き出す）
+SETTINGS_FILE = os.environ.get("SETTINGS_FILE", "/tmp/analyzer_settings.json")
+SETTINGS_CHECK_INTERVAL = 10  # 設定ファイル確認間隔（フレーム数）
+
 
 class ChewingAnalyzer:
     """顔検出 + 口領域差分による咀嚼判定エンジン"""
@@ -96,15 +100,23 @@ class ChewingAnalyzer:
         self.frame_count = 0
         self.last_mtime = 0.0
         self.tv_off_sent = False  # TV OFF コマンド送信済みフラグ
+        self.settings_mtime = 0.0  # 設定ファイルの最終更新時刻
+
+        # 動的パラメータ（設定ファイルで上書き可能）
+        self.chewing_threshold = CHEWING_MOTION_THRESHOLD
+        self.face_scale = FACE_DETECTION_SCALE
+        self.mouth_ratio = MOUTH_ROI_RATIO
+        self.analysis_frames = ANALYSIS_FRAME_COUNT
+        self.pause_threshold = PAUSE_THRESHOLD
 
         log.info(
             "ChewingAnalyzer 初期化完了: threshold=%.0f, scale=%.1f, "
             "mouth_ratio=%.2f, frames=%d, pause=%.0fs",
-            CHEWING_MOTION_THRESHOLD,
-            FACE_DETECTION_SCALE,
-            MOUTH_ROI_RATIO,
-            ANALYSIS_FRAME_COUNT,
-            PAUSE_THRESHOLD,
+            self.chewing_threshold,
+            self.face_scale,
+            self.mouth_ratio,
+            self.analysis_frames,
+            self.pause_threshold,
         )
 
     def run(self):
@@ -113,6 +125,10 @@ class ChewingAnalyzer:
 
         while True:
             try:
+                # 定期的に設定ファイルを確認
+                if self.frame_count % SETTINGS_CHECK_INTERVAL == 0:
+                    self._reload_settings()
+
                 if self._has_new_frame():
                     self._process_frame()
             except KeyboardInterrupt:
@@ -122,6 +138,51 @@ class ChewingAnalyzer:
                 log.exception("フレーム処理中にエラー")
 
             time.sleep(POLL_INTERVAL)
+
+    def _reload_settings(self):
+        """設定ファイルが更新されていれば再読み込み"""
+        path = Path(SETTINGS_FILE)
+        if not path.exists():
+            return
+
+        mtime = path.stat().st_mtime
+        if mtime <= self.settings_mtime:
+            return
+
+        self.settings_mtime = mtime
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                settings = json.load(f)
+
+            changed = False
+            mapping = {
+                "chewingMotionThreshold": ("chewing_threshold", float),
+                "faceDetectionScale": ("face_scale", float),
+                "mouthRoiRatio": ("mouth_ratio", float),
+                "analysisFrameCount": ("analysis_frames", int),
+                "pauseThreshold": ("pause_threshold", float),
+            }
+            for key, (attr, conv) in mapping.items():
+                if key in settings:
+                    new_val = conv(settings[key])
+                    if getattr(self, attr) != new_val:
+                        old_val = getattr(self, attr)
+                        setattr(self, attr, new_val)
+                        log.info("設定変更: %s = %s → %s", key, old_val, new_val)
+                        changed = True
+
+            if changed:
+                log.info(
+                    "設定リロード完了: threshold=%.0f, scale=%.1f, "
+                    "mouth_ratio=%.2f, frames=%d, pause=%.0fs",
+                    self.chewing_threshold,
+                    self.face_scale,
+                    self.mouth_ratio,
+                    self.analysis_frames,
+                    self.pause_threshold,
+                )
+        except Exception:
+            log.exception("設定ファイル読み込みエラー")
 
     def _has_new_frame(self) -> bool:
         """フレームファイルが更新されたか確認"""
@@ -144,10 +205,10 @@ class ChewingAnalyzer:
         self.frame_count += 1
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # 顔検出
+        # 顔検出（動的パラメータ使用）
         faces = self.face_cascade.detectMultiScale(
             gray,
-            scaleFactor=FACE_DETECTION_SCALE,
+            scaleFactor=self.face_scale,
             minNeighbors=5,
             minSize=(60, 60),
         )
@@ -168,19 +229,19 @@ class ChewingAnalyzer:
         face = max(faces, key=lambda f: f[2] * f[3])
         fx, fy, fw, fh = face
 
-        # 口領域 ROI: 顔矩形の下部
-        mouth_y = int(fy + fh * (1 - MOUTH_ROI_RATIO))
+        # 口領域 ROI: 顔矩形の下部（動的パラメータ使用）
+        mouth_y = int(fy + fh * (1 - self.mouth_ratio))
         mouth_roi = gray[mouth_y : fy + fh, fx : fx + fw]
 
         # 口領域の差分計算
         motion_score = self._calculate_motion(mouth_roi)
         self.motion_history.append(motion_score)
-        if len(self.motion_history) > ANALYSIS_FRAME_COUNT:
+        if len(self.motion_history) > self.analysis_frames:
             self.motion_history.pop(0)
 
-        # 咀嚼判定（直近 N フレームの平均 motion_score）
+        # 咀嚼判定（直近 N フレームの平均 motion_score、動的パラメータ使用）
         avg_motion = sum(self.motion_history) / len(self.motion_history)
-        if avg_motion > CHEWING_MOTION_THRESHOLD:
+        if avg_motion > self.chewing_threshold:
             new_state = self.STATE_CHEWING
         else:
             new_state = self.STATE_STOPPED
@@ -230,12 +291,12 @@ class ChewingAnalyzer:
         face_confidence = min(face_area_ratio * 10, 0.4)  # 最大 0.4
 
         # フレーム数の信頼度（分析フレームが多いほど安定）
-        frame_ratio = len(self.motion_history) / ANALYSIS_FRAME_COUNT
+        frame_ratio = len(self.motion_history) / self.analysis_frames
         frame_confidence = min(frame_ratio * 0.2, 0.2)  # 最大 0.2
 
         # 判定の確信度（閾値からの距離）
-        if CHEWING_MOTION_THRESHOLD > 0:
-            motion_ratio = avg_motion / CHEWING_MOTION_THRESHOLD
+        if self.chewing_threshold > 0:
+            motion_ratio = avg_motion / self.chewing_threshold
             if state == self.STATE_CHEWING:
                 # 閾値を超えている量が多いほど確信度高
                 decision_confidence = min((motion_ratio - 1) * 0.5, 0.4)
@@ -325,12 +386,12 @@ class ChewingAnalyzer:
             log.debug(
                 "咀嚼停止中: %.1f秒 / %.0f秒",
                 stopped_duration,
-                PAUSE_THRESHOLD,
+                self.pause_threshold,
             )
             # pauseThreshold 到達時もエビデンスアップロード
             if (
                 stopped_duration >= PAUSE_THRESHOLD
-                and stopped_duration - (now - self.last_mtime) < PAUSE_THRESHOLD
+                and stopped_duration - (now - self.last_mtime) < self.pause_threshold
                 and EVIDENCE_ON_STATE_CHANGE
                 and self.s3
             ):
@@ -344,7 +405,7 @@ class ChewingAnalyzer:
                 )
 
         # TV 制御コマンドの書き出し
-        if new_state == self.STATE_STOPPED and stopped_duration >= PAUSE_THRESHOLD:
+        if new_state == self.STATE_STOPPED and stopped_duration >= self.pause_threshold:
             if not self.tv_off_sent:
                 self._send_device_command("turn_off", f"chewing_stopped_{int(stopped_duration)}s")
                 self.tv_off_sent = True
@@ -448,7 +509,7 @@ class ChewingAnalyzer:
                 # 顔バウンディングボックス
                 cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
                 # 口領域
-                mouth_y = int(fy + fh * (1 - MOUTH_ROI_RATIO))
+                mouth_y = int(fy + fh * (1 - self.mouth_ratio))
                 cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
 
             # 状態とスコアとconfidenceのテキスト表示
@@ -484,7 +545,7 @@ class ChewingAnalyzer:
             for fx, fy, fw, fh in faces:
                 cv2.rectangle(evidence, (fx, fy), (fx + fw, fy + fh), (0, 255, 0), 2)
                 # 口領域を描画
-                mouth_y = int(fy + fh * (1 - MOUTH_ROI_RATIO))
+                mouth_y = int(fy + fh * (1 - self.mouth_ratio))
                 cv2.rectangle(
                     evidence,
                     (fx, mouth_y),

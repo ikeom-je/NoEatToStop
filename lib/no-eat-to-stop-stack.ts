@@ -26,6 +26,7 @@ export class NoEatToStopStack extends cdk.Stack {
   public readonly chewingStatesTable: dynamodb.Table;
   public readonly tvControlEventsTable: dynamodb.Table;
   public readonly frameHistoryTable: dynamodb.Table;
+  public readonly labelsTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
   public readonly distribution: cloudfront.Distribution;
 
@@ -122,6 +123,15 @@ export class NoEatToStopStack extends cdk.Stack {
       timeToLiveAttribute: 'expiresAt',
     });
 
+    this.labelsTable = new dynamodb.Table(this, 'LabelsTable', {
+      tableName: `Labels-${stage}`,
+      partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'epochMs', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'expiresAt',
+    });
+
     this.chewingStatesTable = new dynamodb.Table(this, 'ChewingStatesTable', {
       tableName: `ChewingStates-${stage}`,
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
@@ -205,6 +215,7 @@ export class NoEatToStopStack extends cdk.Stack {
         this.chewingStatesTable.tableArn,
         this.tvControlEventsTable.tableArn,
         this.frameHistoryTable.tableArn,
+        this.labelsTable.tableArn,
       ],
     }));
 
@@ -515,6 +526,42 @@ export class NoEatToStopStack extends cdk.Stack {
 
     const frameHistoryResource = this.api.root.addResource('frame-history');
     frameHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(getFrameHistoryFn));
+
+    // Labels API (Human-in-the-loop ラベリング)
+    const labelsEnv = {
+      ...lambdaEnv,
+      LABELS_TABLE: this.labelsTable.tableName,
+    };
+
+    const saveLabelFn = new lambda.Function(this, 'SaveLabelHandler', {
+      functionName: `noeatstop-save-label-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.saveLabel',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: labelsEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const getLabelsFn = new lambda.Function(this, 'GetLabelsHandler', {
+      functionName: `noeatstop-get-labels-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getLabels',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: labelsEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const labelsResource = this.api.root.addResource('labels');
+    labelsResource.addMethod('POST', new apigateway.LambdaIntegration(saveLabelFn));
+    labelsResource.addMethod('GET', new apigateway.LambdaIntegration(getLabelsFn));
 
     // ========================================
     // CloudFront Distribution

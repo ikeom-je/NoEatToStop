@@ -41,7 +41,7 @@ RUN apt-get update && \
       gnupg \
     && \
     # Python パッケージ（ChewingAnalyzer 用）
-    pip3 install --no-cache-dir boto3 && \
+    pip3 install --no-cache-dir boto3 paho-mqtt && \
     # Node.js 22 LTS (NodeSource)
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \

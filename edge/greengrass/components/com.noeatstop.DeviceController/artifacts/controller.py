@@ -15,6 +15,9 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import ssl
+import threading
+
 import boto3
 from botocore.exceptions import ClientError
 
@@ -48,6 +51,19 @@ MQTT_TOPIC = f"noeatstop/{THING_NAME}/tv-control"
 # ポーリング間隔
 POLL_INTERVAL = float(os.environ.get("CONTROLLER_POLL_INTERVAL", "1"))
 S3_POLL_INTERVAL = float(os.environ.get("S3_POLL_INTERVAL", "5"))
+
+# MQTT Subscribe トピック（設定変更 + TV コマンド受信）
+SETTINGS_TOPIC = f"noeatstop/{THING_NAME}/settings-update"
+TV_COMMAND_TOPIC = f"noeatstop/{THING_NAME}/tv-command"
+
+# Greengrass 証明書パス（MQTT Subscribe 用）
+GGC_ROOT = os.environ.get("GGC_ROOT_PATH", "/greengrass/v2")
+CERT_PATH = os.environ.get("CERT_PATH", f"{GGC_ROOT}/thingCert.crt")
+KEY_PATH = os.environ.get("KEY_PATH", f"{GGC_ROOT}/privKey.key")
+CA_PATH = os.environ.get("CA_PATH", f"{GGC_ROOT}/rootCA.pem")
+
+# 設定ファイル（ChewingAnalyzer が読み込む）
+SETTINGS_FILE = os.environ.get("SETTINGS_FILE", "/tmp/analyzer_settings.json")
 
 
 class TVController:
@@ -129,6 +145,10 @@ class DeviceController:
         else:
             self.iot_data = None
             log.warning("IOT_ENDPOINT 未設定 — MQTT 送信は無効")
+
+        # MQTT Subscribe（設定変更 + TV コマンド受信）
+        self.mqtt_client = None
+        self._start_mqtt_subscriber()
 
         # 状態管理
         self.last_command_mtime = 0.0
@@ -304,6 +324,92 @@ class DeviceController:
                 json.dump(status, f)
         except IOError:
             log.exception("ステータスファイル書き込み失敗")
+
+    def _start_mqtt_subscriber(self):
+        """paho-mqtt で IoT Core に接続し、設定変更・TV コマンドを受信"""
+        if not IOT_ENDPOINT:
+            log.warning("IOT_ENDPOINT 未設定 — MQTT Subscribe は無効")
+            return
+
+        # 証明書の存在確認
+        if not all(os.path.exists(p) for p in [CERT_PATH, KEY_PATH, CA_PATH]):
+            log.warning("Greengrass 証明書が見つかりません — MQTT Subscribe は無効")
+            return
+
+        try:
+            import paho.mqtt.client as paho_mqtt
+        except ImportError:
+            log.warning("paho-mqtt 未インストール — MQTT Subscribe は無効")
+            return
+
+        def on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                log.info("MQTT Subscribe 接続成功")
+                client.subscribe(SETTINGS_TOPIC, qos=1)
+                client.subscribe(TV_COMMAND_TOPIC, qos=1)
+                log.info("MQTT Subscribe: %s, %s", SETTINGS_TOPIC, TV_COMMAND_TOPIC)
+            else:
+                log.error("MQTT Subscribe 接続失敗: rc=%d", rc)
+
+        def on_message(client, userdata, msg):
+            try:
+                payload = json.loads(msg.payload.decode("utf-8"))
+                topic = msg.topic
+
+                if topic == SETTINGS_TOPIC:
+                    self._handle_settings_update(payload)
+                elif topic == TV_COMMAND_TOPIC:
+                    self._handle_mqtt_tv_command(payload)
+                else:
+                    log.info("不明なトピック: %s", topic)
+            except Exception:
+                log.exception("MQTT メッセージ処理エラー")
+
+        self.mqtt_client = paho_mqtt.Client(client_id=f"{THING_NAME}-controller")
+        self.mqtt_client.tls_set(
+            ca_certs=CA_PATH,
+            certfile=CERT_PATH,
+            keyfile=KEY_PATH,
+            tls_version=ssl.PROTOCOL_TLSv1_2,
+        )
+        self.mqtt_client.on_connect = on_connect
+        self.mqtt_client.on_message = on_message
+
+        try:
+            self.mqtt_client.connect(IOT_ENDPOINT, 8883, keepalive=60)
+            self.mqtt_client.loop_start()
+            log.info("MQTT Subscribe スレッド開始")
+        except Exception:
+            log.exception("MQTT Subscribe 接続エラー")
+            self.mqtt_client = None
+
+    def _handle_settings_update(self, payload: dict):
+        """設定変更を受信して ChewingAnalyzer に反映"""
+        log.info("設定変更受信: %s", json.dumps(payload, ensure_ascii=False))
+
+        # 設定ファイルに書き出し → ChewingAnalyzer が定期的に読み込む
+        try:
+            with open(SETTINGS_FILE, "w") as f:
+                json.dump(payload, f)
+            log.info("設定ファイル更新: %s", SETTINGS_FILE)
+        except IOError:
+            log.exception("設定ファイル書き込み失敗")
+
+    def _handle_mqtt_tv_command(self, payload: dict):
+        """MQTT 経由の TV コマンドを処理"""
+        action = payload.get("action")
+        reason = payload.get("reason", "mqtt_command")
+        request_id = payload.get("requestId", "")
+
+        if action not in ("turn_on", "turn_off"):
+            log.warning("不明な TV コマンド: %s", action)
+            return
+
+        if request_id in self.processed_commands:
+            return
+
+        log.info("MQTT TV コマンド受信: action=%s, reason=%s", action, reason)
+        self._execute_and_report(action, reason, "mqtt", request_id)
 
 
 def main():
