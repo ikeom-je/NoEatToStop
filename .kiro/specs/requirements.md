@@ -19,6 +19,9 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 - **管理画面**: Vue.js製のWeb管理インターフェース
 - **TVコントロールインターフェース**: 外部テレビ制御システムとの統合用インターフェース
 - **TVコントロール状態**: テレビ制御リクエストの実行状態と履歴情報
+- **Cognito User Pool**: AWS の認証サービス。管理画面へのアクセス制御に使用
+- **PKCE**: Proof Key for Code Exchange。SPA 向けセキュアな OAuth 2.0 拡張
+- **Cognito Authorizer**: API Gateway 組み込みの Cognito トークン検証機能
 
 ## Requirements
 
@@ -123,3 +126,17 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 2. WHEN TVコントロールインターフェースが呼び出された場合 THEN システム SHALL 呼び出し履歴を記録する
 3. WHEN テスト実行時 THEN システム SHALL モックTVコントロールサービスを使用してインターフェース呼び出しを検証する
 4. WHEN 統合テストを実行する場合 THEN テスト SHALL TVコントロールインターフェースの呼び出し回数と内容を確認する
+
+### Requirement 9
+
+**User Story:** 保護者として、管理画面に表示される検出画像や映像データが第三者に閲覧されることを防ぎたい。そのため、認証されたユーザーのみがシステムにアクセスできるようにしたい。
+
+#### Acceptance Criteria
+
+1. WHEN 未認証ユーザーが管理画面にアクセスする THEN システム SHALL Cognito Managed Login 画面にリダイレクトする
+2. WHEN ユーザーが正しい認証情報でログインする THEN システム SHALL Authorization Code Flow with PKCE でトークンを発行し、管理画面へ遷移させる
+3. WHEN 認証済みユーザーが API を呼び出す THEN システム SHALL Bearer トークンを自動付与し、Cognito Authorizer で検証する
+4. WHEN 未認証の API リクエストを受信する THEN API Gateway SHALL 401 Unauthorized を返却する
+5. WHEN アクセストークンが期限切れになる THEN フロントエンド SHALL リフレッシュトークンで自動更新し、更新失敗時はログアウトする
+6. WHEN ユーザーがログアウトする THEN システム SHALL ローカルトークンを削除し、Cognito ログアウトエンドポイントにリダイレクトする
+7. WHEN 新規ユーザーを追加する THEN 管理者 SHALL AWS CLI `admin-create-user` で招待する（セルフサインアップ無効）

@@ -211,20 +211,26 @@ function getMealSession(key: any) {
 
 ## API Security
 
-### API Gateway認証
+### API Gateway認証（Cognito Authorizer）
+
+本システムは Amazon Cognito User Pool + CognitoUserPoolsAuthorizer で全 API を保護している。
 
 ```typescript
-// ✅ Good: IAM認証またはCognito認証
-const api = new RestApi(this, 'MealSessionApi', {
-  defaultCorsPreflightOptions: {
-    allowOrigins: ['https://example.com'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowHeaders: ['Content-Type', 'Authorization']
-  }
+// ✅ 実装済み: Cognito User Pool + PKCE Authorization Code Flow
+const userPool = new cognito.UserPool(this, 'UserPool', {
+  selfSignUpEnabled: false,  // 管理者招待のみ
+  signInAliases: { email: true },
 });
 
-api.root.addMethod('GET', integration, {
-  authorizationType: AuthorizationType.IAM
+const cognitoAuthorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
+  cognitoUserPools: [userPool],
+  identitySource: 'method.request.header.Authorization',
+});
+
+// 全 API メソッドに Cognito Authorizer を適用
+resource.addMethod('GET', integration, {
+  authorizationType: apigateway.AuthorizationType.COGNITO,
+  authorizer: cognitoAuthorizer,
 });
 
 // ❌ Bad: 認証なし
@@ -232,6 +238,13 @@ api.root.addMethod('GET', integration, {
   authorizationType: AuthorizationType.NONE
 });
 ```
+
+### フロントエンド認証実装
+
+- **PKCE フロー**: `crypto.getRandomValues` + `crypto.subtle.digest` による手動実装（外部ライブラリ不使用）
+- **トークン保存**: access_token / refresh_token → `localStorage`、code_verifier → `sessionStorage`
+- **自動リフレッシュ**: axios response interceptor で 401 検出 → refresh_token でトークン更新 → リトライ
+- **認証ガード**: Vue Router `beforeEach` で未認証ユーザーを Cognito ログイン画面にリダイレクト
 
 ### CORS設定
 

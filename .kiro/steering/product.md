@@ -19,6 +19,6 @@ Parents who want to encourage their children to focus on eating during meals rat
 
 - Edge device with camera (Raspberry Pi or development on macOS)
 - AWS cloud infrastructure for video processing and AI analysis
-- Web application for monitoring and configuration
+- Web application for monitoring and configuration (Cognito 認証必須)
 - TV control interface for external system integration
 - Real-time status monitoring and request tracking

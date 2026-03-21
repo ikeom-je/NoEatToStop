@@ -247,9 +247,28 @@
     - Add USB camera device mount configuration
     - _Requirements: 5.4, 2.1_
 
-  - [x] 9.3 Create comprehensive system documentation
+  - [x] 9.3 Create comprehensive system documentation (認証ドキュメント含む)
     - Write installation and setup documentation for Raspberry Pi 3B and AWS components
     - Create user manual for web management interface with all configuration options
     - Document troubleshooting procedures for camera failures, network issues, and TV control problems
     - Create performance tuning guide for all configurable parameters
     - _Requirements: 4.1, 4.2, 4.3_
+
+- [x] 10. Cognito 認証機能の追加
+  - [x] 10.1 CDK — Cognito リソース追加
+    - Cognito User Pool（`noeatstop-users-{stage}`、selfSignUp 無効、email サインイン、RETAIN）
+    - Cognito Domain（`noeatstop-{stage}` プレフィックス）
+    - App Client（PKCE、Authorization Code Grant、openid/email/profile）
+    - CognitoUserPoolsAuthorizer を全14 API メソッドに適用
+    - CfnOutput: UserPoolId, UserPoolClientId, CognitoDomainName
+    - _Requirements: 9.1, 9.2, 9.3, 9.4_
+
+  - [x] 10.2 Frontend — 認証サービス・ストア・コンポーネント
+    - authService.ts: PKCE 生成、Cognito OAuth フロー、トークン管理（外部ライブラリ不使用）
+    - authStore.ts: Pinia 認証状態ストア（login, logout, handleCallback, checkAuth）
+    - AuthCallback.vue: OAuth callback ページ
+    - apiService.ts: axios interceptor（Bearer token 付与 + 401 リフレッシュ）
+    - router/index.ts: `/callback` ルート + beforeEach 認証ガード
+    - App.vue: ヘッダーにユーザーメール + ログアウトボタン
+    - main.ts: app.mount 前に authStore.checkAuth() 実行
+    - _Requirements: 9.1, 9.2, 9.3, 9.5, 9.6_

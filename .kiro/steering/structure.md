@@ -59,6 +59,8 @@ The CDK stack creates a multi-stage environment with the following resources:
 - **CloudFront Distribution**: CDN for web application
 
 ### Security & Access
+- **Cognito User Pool**: 管理画面認証（PKCE Authorization Code Flow、セルフサインアップ無効）
+- **Cognito Authorizer**: 全 API Gateway メソッドのトークン検証
 - **Edge Device Role**: IoT credentials for Raspberry Pi
 - **Lambda Execution Role**: Permissions for video processing
 - Least-privilege IAM policies for each component
