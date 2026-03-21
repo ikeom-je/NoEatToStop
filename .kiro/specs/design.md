@@ -50,6 +50,10 @@ graph TB
         end
     end
 
+    subgraph "認証"
+        Cognito[Cognito User Pool]
+    end
+
     subgraph "Web Management"
         CloudFront[CloudFront CDN]
         VueApp["Vue.js SPA"]
@@ -76,7 +80,9 @@ graph TB
     DynamoDB --> APIGateway
 
     CloudFront --> VueApp
-    VueApp -->|API| APIGateway
+    VueApp -->|"PKCE OAuth"| Cognito
+    VueApp -->|"API + Bearer token"| APIGateway
+    APIGateway -->|"Cognito Authorizer"| Cognito
 ```
 
 ### Docker コンテナ構成（案 B: Greengrass 統合）
@@ -189,6 +195,49 @@ noeatstop-videos-{stage}-{account}/
             ├── analysis-frames/
             └── metadata.json
 ```
+
+### 認証アーキテクチャ（Cognito + PKCE）
+
+```
+認証フロー（Authorization Code Flow with PKCE）
+=================================================
+
+[Browser]                    [Cognito]                    [API Gateway]
+    |                            |                             |
+    |  1. 管理画面アクセス（未認証）  |                             |
+    |--- router guard 検出 ----->|                             |
+    |                            |                             |
+    |  2. /oauth2/authorize      |                             |
+    |--- (code_challenge) ------>|                             |
+    |                            |                             |
+    |  3. Managed Login 画面表示  |                             |
+    |<--- Login UI --------------|                             |
+    |                            |                             |
+    |  4. 認証情報入力 + 送信     |                             |
+    |--- email/password -------->|                             |
+    |                            |                             |
+    |  5. /callback?code=xxx     |                             |
+    |<--- redirect --------------|                             |
+    |                            |                             |
+    |  6. /oauth2/token          |                             |
+    |--- (code + verifier) ----->|                             |
+    |                            |                             |
+    |  7. access/id/refresh token|                             |
+    |<--- tokens ----------------|                             |
+    |                            |                             |
+    |  8. API リクエスト          |                             |
+    |--- Authorization: Bearer --|------ Cognito Authorizer -->|
+    |                            |       トークン検証            |
+    |  9. API レスポンス          |                             |
+    |<--- data ------------------|------- Lambda 実行 ---------|
+```
+
+- **User Pool**: `noeatstop-users-{stage}`, selfSignUp 無効, email サインイン
+- **App Client**: PKCE（generateSecret: false）, Authorization Code Grant, scopes: openid/email/profile
+- **Domain**: Cognito Managed Login（`noeatstop-{stage}.auth.{region}.amazoncognito.com`）
+- **Authorizer**: CognitoUserPoolsAuthorizer、全14 API メソッドに適用
+- **トークン保存**: access_token / refresh_token → localStorage、code_verifier → sessionStorage
+- **トークン有効期限**: access_token 1時間、refresh_token 30日
 
 ## Components and Interfaces
 
@@ -398,6 +447,7 @@ noeatstop-webapp-{stage}-{account}/       ← フロントエンド用バケッ�
 ```
 src/
 ├── components/
+│   ├── AuthCallback.vue       # OAuth callback ページ（認証コード → トークン交換）
 │   ├── LiveVideo.vue          # ライブ映像表示（presigned URL で S3 フレーム取得、定期更新）
 │   ├── MealHistory.vue        # 食事履歴・統計（咀嚼時間、TV制御回数）
 │   ├── SystemSettings.vue     # システム設定（全パラメータ設定変更）
@@ -406,15 +456,16 @@ src/
 │   ├── ErrorAnalysis.vue     # 誤判定フラグ入力・分析
 │   └── TVControlStatus.vue   # TVコントロール状態表示・監視
 ├── stores/
-│   ├── mealStore.js          # 食事データ管理
-│   ├── settingsStore.js      # 設定管理（全パラメータ対応）
-│   ├── errorStore.js         # 誤判定データ管理
-│   └── tvControlStore.js     # TVコントロール状態管理
+│   ├── authStore.ts          # 認証状態管理（Cognito OAuth）
+│   ├── mealStore.ts          # 食事データ管理
+│   ├── settingsStore.ts      # 設定管理（全パラメータ対応）
+│   └── tvControlStore.ts     # TVコントロール状態管理
+├── router/
+│   └── index.ts              # ルーティング + 認証ガード（beforeEach）
 └── services/
-    ├── apiService.js         # API通信
-    ├── websocketService.js   # リアルタイム通信
-    ├── emergencyService.js   # 緊急制御サービス
-    └── tvControlService.js   # TVコントロール状態取得
+    ├── authService.ts        # PKCE 生成、Cognito OAuth フロー、トークン管理
+    ├── apiService.ts         # API通信（Bearer token 自動付与 + 401 リフレッシュ）
+    └── ...
 ```
 
 ## Data Models
@@ -584,6 +635,12 @@ test_scenarios = {
 ```
 
 ## Security Considerations
+
+### 管理画面認証
+- **Amazon Cognito User Pool**: セルフサインアップ無効、管理者招待のみ
+- **Authorization Code Flow with PKCE**: SPA 向けセキュアな認証フロー（外部ライブラリ不使用）
+- **Cognito Authorizer**: 全 API Gateway メソッドにトークン検証を適用
+- **トークン管理**: access_token（1h）/ refresh_token（30d）を localStorage に保存、自動リフレッシュ
 
 ### Device Security
 - IoT Greengrass証明書による認証

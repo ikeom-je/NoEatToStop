@@ -11,6 +11,7 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 
 export interface NoEatToStopStackProps extends cdk.StackProps {
@@ -261,6 +262,41 @@ export class NoEatToStopStack extends cdk.Stack {
     }));
 
     // ========================================
+    // Cognito User Pool
+    // ========================================
+
+    const userPool = new cognito.UserPool(this, 'UserPool', {
+      userPoolName: `noeatstop-users-${stage}`,
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+      standardAttributes: {
+        email: { required: true, mutable: true },
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const cognitoDomain = userPool.addDomain('CognitoDomain', {
+      cognitoDomain: { domainPrefix: `noeatstop-${stage}` },
+    });
+
+    const userPoolClient = userPool.addClient('WebAppClient', {
+      userPoolClientName: `noeatstop-webapp-${stage}`,
+      generateSecret: false,
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.PROFILE,
+        ],
+        callbackUrls: ['https://d2s0dqsd7u77p.cloudfront.net/callback'],
+        logoutUrls: ['https://d2s0dqsd7u77p.cloudfront.net/'],
+      },
+      accessTokenValidity: cdk.Duration.hours(1),
+      refreshTokenValidity: cdk.Duration.days(30),
+    });
+
+    // ========================================
     // API Gateway
     // ========================================
 
@@ -407,21 +443,32 @@ export class NoEatToStopStack extends cdk.Stack {
     const settingsResource = this.api.root.addResource('settings');
     const settingKeyResource = settingsResource.addResource('{settingKey}');
 
+    // Cognito Authorizer
+    const cognitoAuthorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
+      cognitoUserPools: [userPool],
+      identitySource: 'method.request.header.Authorization',
+    });
+
+    const authMethodOptions: apigateway.MethodOptions = {
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+      authorizer: cognitoAuthorizer,
+    };
+
     // Lambda統合
-    mealSessionResource.addMethod('POST', new apigateway.LambdaIntegration(createSessionFn));
-    mealSessionIdResource.addMethod('GET', new apigateway.LambdaIntegration(getSessionFn));
+    mealSessionResource.addMethod('POST', new apigateway.LambdaIntegration(createSessionFn), authMethodOptions);
+    mealSessionIdResource.addMethod('GET', new apigateway.LambdaIntegration(getSessionFn), authMethodOptions);
 
-    eatingStateResource.addMethod('POST', new apigateway.LambdaIntegration(createStateFn));
-    eatingStateSessionResource.addMethod('GET', new apigateway.LambdaIntegration(getStatesFn));
+    eatingStateResource.addMethod('POST', new apigateway.LambdaIntegration(createStateFn), authMethodOptions);
+    eatingStateSessionResource.addMethod('GET', new apigateway.LambdaIntegration(getStatesFn), authMethodOptions);
 
-    settingKeyResource.addMethod('GET', new apigateway.LambdaIntegration(getSettingFn));
-    settingKeyResource.addMethod('PUT', new apigateway.LambdaIntegration(updateSettingFn));
+    settingKeyResource.addMethod('GET', new apigateway.LambdaIntegration(getSettingFn), authMethodOptions);
+    settingKeyResource.addMethod('PUT', new apigateway.LambdaIntegration(updateSettingFn), authMethodOptions);
 
     const videoResource = this.api.root.addResource('video');
     const latestFrameResource = videoResource.addResource('latest-frame');
-    latestFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestFrameFn));
+    latestFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestFrameFn), authMethodOptions);
     const latestAnalyzedFrameResource = videoResource.addResource('latest-analyzed-frame');
-    latestAnalyzedFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestAnalyzedFrameFn));
+    latestAnalyzedFrameResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestAnalyzedFrameFn), authMethodOptions);
 
     const getChewingStatesFn = new lambda.Function(this, 'GetChewingStatesHandler', {
       functionName: `noeatstop-get-chewing-states-${stage}`,
@@ -440,7 +487,7 @@ export class NoEatToStopStack extends cdk.Stack {
     });
 
     const chewingStatesResource = this.api.root.addResource('chewing-states');
-    chewingStatesResource.addMethod('GET', new apigateway.LambdaIntegration(getChewingStatesFn));
+    chewingStatesResource.addMethod('GET', new apigateway.LambdaIntegration(getChewingStatesFn), authMethodOptions);
 
     // TV Control Events API
     const getTVControlEventsFn = new lambda.Function(this, 'GetTVControlEventsHandler', {
@@ -477,9 +524,9 @@ export class NoEatToStopStack extends cdk.Stack {
 
     // tv-control リソースの再構成（既存の session ベースを events ベースに変更）
     const tvControlEventsResource = tvControlResource.addResource('events');
-    tvControlEventsResource.addMethod('GET', new apigateway.LambdaIntegration(getTVControlEventsFn));
+    tvControlEventsResource.addMethod('GET', new apigateway.LambdaIntegration(getTVControlEventsFn), authMethodOptions);
     const tvControlCommandResource = tvControlResource.addResource('command');
-    tvControlCommandResource.addMethod('POST', new apigateway.LambdaIntegration(sendTVCommandFn));
+    tvControlCommandResource.addMethod('POST', new apigateway.LambdaIntegration(sendTVCommandFn), authMethodOptions);
 
     // ========================================
     // S3 Event Notification → Lambda → DynamoDB (Frame History)
@@ -525,7 +572,7 @@ export class NoEatToStopStack extends cdk.Stack {
     });
 
     const frameHistoryResource = this.api.root.addResource('frame-history');
-    frameHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(getFrameHistoryFn));
+    frameHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(getFrameHistoryFn), authMethodOptions);
 
     // Labels API (Human-in-the-loop ラベリング)
     const labelsEnv = {
@@ -560,8 +607,8 @@ export class NoEatToStopStack extends cdk.Stack {
     });
 
     const labelsResource = this.api.root.addResource('labels');
-    labelsResource.addMethod('POST', new apigateway.LambdaIntegration(saveLabelFn));
-    labelsResource.addMethod('GET', new apigateway.LambdaIntegration(getLabelsFn));
+    labelsResource.addMethod('POST', new apigateway.LambdaIntegration(saveLabelFn), authMethodOptions);
+    labelsResource.addMethod('GET', new apigateway.LambdaIntegration(getLabelsFn), authMethodOptions);
 
     // ========================================
     // CloudFront Distribution
@@ -898,6 +945,21 @@ export class NoEatToStopStack extends cdk.Stack {
     // ========================================
     // Outputs
     // ========================================
+
+    new cdk.CfnOutput(this, 'UserPoolId', {
+      value: userPool.userPoolId,
+      description: 'Cognito User Pool ID',
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolClientId', {
+      value: userPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID',
+    });
+
+    new cdk.CfnOutput(this, 'CognitoDomainName', {
+      value: `${cognitoDomain.domainName}.auth.${this.region}.amazoncognito.com`,
+      description: 'Cognito Hosted UI Domain',
+    });
 
     new cdk.CfnOutput(this, 'VideoBucketName', {
       value: this.videoBucket.bucketName,

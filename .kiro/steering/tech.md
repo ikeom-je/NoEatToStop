@@ -15,6 +15,7 @@
 - **Database**: Amazon DynamoDB (meal sessions, eating states, system settings)
 - **Edge Computing**: AWS IoT Greengrass (local Lambda functions)
 - **CDN**: Amazon CloudFront
+- **認証**: Amazon Cognito (User Pool + Managed Login + PKCE)
 - **Monitoring**: Amazon Managed Grafana + QuickSight
 - **TV Control**: Interface-based external system integration
 
