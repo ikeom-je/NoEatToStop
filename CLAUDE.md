@@ -66,6 +66,25 @@
 5. **状態**: chewing / chewing_stopped / meal_ended / waiting
 6. **エビデンス**: 状態変化時にBB付き画像を S3 `evidence/` にアップロード
 
+## 認証（Cognito）
+
+- 管理画面は Amazon Cognito User Pool + PKCE Authorization Code Flow で保護
+- セルフサインアップ無効。ユーザーは管理者が AWS CLI で招待
+- CDK デプロイ時に `UserPoolId`, `UserPoolClientId`, `CognitoDomainName` が outputs に出力される
+- フロントエンドビルド時に `.env.local` の `VITE_COGNITO_*` 環境変数が必要:
+  - `VITE_COGNITO_DOMAIN` — Cognito Managed Login ドメイン
+  - `VITE_COGNITO_CLIENT_ID` — User Pool App Client ID
+  - `VITE_COGNITO_REDIRECT_URI` — `/callback` パスを含む CloudFront URL
+  - `VITE_COGNITO_LOGOUT_URI` — CloudFront ルート URL
+  - `COGNITO_USER_POOL_ID` — ユーザー管理用（フロントエンドでは不使用）
+- ユーザー管理: `aws cognito-idp admin-create-user` + `admin-set-user-password --permanent`
+- 認証関連ファイル:
+  - `frontend/src/services/authService.ts` — PKCE 生成、OAuth フロー、トークン管理
+  - `frontend/src/stores/authStore.ts` — Pinia 認証状態ストア
+  - `frontend/src/router/index.ts` — beforeEach 認証ガード
+  - `frontend/src/components/AuthCallback.vue` — OAuth callback
+  - `lib/no-eat-to-stop-stack.ts` — Cognito User Pool, App Client, Authorizer (CDK)
+
 ## 開発ルール
 
 - **言語**: ドキュメント・コメント・チャット応答は日本語
@@ -82,5 +101,5 @@ npm run build          # TypeScript ビルド
 npm run test           # 全テスト実行
 npm run test:unit      # ユニットテスト
 npm run deploy         # CDK デプロイ
-npm run deploy:all     # 全体デプロイ
+npm run deploy:all     # 全体デプロイ（VITE_COGNITO_* 環境変数を .env.local に設定してから実行）
 ```

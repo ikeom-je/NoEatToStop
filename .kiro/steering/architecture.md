@@ -79,7 +79,7 @@
 1. **Edge Layer**: Host ffmpeg + Docker (MediaMTX, frame-capture, Greengrass)
 2. **Live Video Pipeline**: frame-capture → S3 → Lambda (presigned URL) → フロントエンド
 3. **Processing Layer**: Lambda（ビジネスロジック）
-4. **AI Layer**: Amazon Bedrock / Rekognition（画像分析）
+4. **AI Layer**: Edge OpenCV（顔検出・咀嚼判定）/ Amazon Bedrock（将来拡張用）
 5. **Storage Layer**: DynamoDB + S3（データ永続化）
 6. **API Layer**: API Gateway（RESTful API）
 7. **Presentation Layer**: CloudFront + S3（Vue.js SPA）

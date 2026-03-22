@@ -7,7 +7,7 @@
 ### 完了済みタスク
 - **Task 1**: プロジェクト構造とCDKインフラストラクチャ ✅
 - **Task 2.1-2.3**: DynamoDBテーブル定義とデータアクセス層 ✅
-- **Task 3.1-3.2**: KVSストリームとS3ストレージ ✅
+- **Task 3.1-3.2**: S3ストレージ ✅
 - **Task 4.1-4.3**: クラウド動画処理Lambda関数群 ✅
   - MealStateManagerサービスクラス実装
   - API Gateway統合（POST /meal-session, POST /eating-state, GET /tv-control/{sessionId}/should-control）

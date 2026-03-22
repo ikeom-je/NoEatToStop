@@ -57,7 +57,7 @@ NoEatToStopシステムは、子供の食事中の行動を監視し、食事動
 
 1. WHEN 映像データを保存する THEN システム SHALL エッジデバイスにデフォルト10秒分の映像を一時保存する
 2. WHEN 1回の食事が完了する THEN システム SHALL AWS側に1日分の映像データを保存する
-3. WHEN 映像データを送信する THEN システム SHALL Amazon Kinesis Video Streams（KVS）を使用してデフォルト640x360/30fpsでストリーミング配信を行う
+3. WHEN 映像データを送信する THEN システム SHALL S3 にフレーム画像をアップロードし、presigned URL 経由で管理画面に配信する
 4. WHEN システムの動作状況を監視する THEN システム SHALL IoT Greengrassを活用してログと監視データを可視化する
 5. WHEN 映像データアクセスが必要な場合 THEN システム SHALL 管理画面の管理IDを持つユーザーのみにアクセス権限を付与する
 6. WHEN 誤判定を検証する場合 THEN システム SHALL 判定時の画像・動画を1日分保存し、手動での誤判定フラグ入力機能を提供する
