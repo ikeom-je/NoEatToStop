@@ -96,8 +96,8 @@ export async function refreshAccessToken(): Promise<boolean> {
   }
 }
 
-export function getAccessToken(): string | null {
-  const token = localStorage.getItem('access_token');
+export function getIdToken(): string | null {
+  const token = localStorage.getItem('id_token');
   if (!token) return null;
 
   try {
@@ -110,7 +110,7 @@ export function getAccessToken(): string | null {
 }
 
 export function isAuthenticated(): boolean {
-  return getAccessToken() !== null;
+  return getIdToken() !== null;
 }
 
 export function getUserEmail(): string | null {

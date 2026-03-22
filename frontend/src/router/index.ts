@@ -53,12 +53,12 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.meta.requiresAuth === false) return true;
 
   const authStore = useAuthStore();
   if (!authStore.authenticated) {
-    authStore.login();
+    await authStore.login();
     return false;
   }
   return true;

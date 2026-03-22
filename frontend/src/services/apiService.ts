@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import type { MealSession, EatingState, SystemConfiguration, TVControlRecord } from '@/types';
-import { getAccessToken, refreshAccessToken, logout } from '@/services/authService';
+import { getIdToken, refreshAccessToken, logout } from '@/services/authService';
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
@@ -8,7 +8,7 @@ const apiClient: AxiosInstance = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = getAccessToken();
+  const token = getIdToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -23,7 +23,7 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       const refreshed = await refreshAccessToken();
       if (refreshed) {
-        originalRequest.headers.Authorization = `Bearer ${getAccessToken()}`;
+        originalRequest.headers.Authorization = `Bearer ${getIdToken()}`;
         return apiClient(originalRequest);
       }
       logout();

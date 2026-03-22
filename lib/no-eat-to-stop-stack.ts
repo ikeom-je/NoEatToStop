@@ -313,6 +313,15 @@ export class NoEatToStopStack extends cdk.Stack {
       },
     });
 
+    // Authorizer 拒否時（4XX）にも CORS ヘッダーを返す
+    this.api.addGatewayResponse('Default4xx', {
+      type: apigateway.ResponseType.DEFAULT_4XX,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'*'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+      },
+    });
+
     // Lambda環境変数
     const lambdaEnv = {
       MEAL_SESSIONS_TABLE: this.mealSessionsTable.tableName,
