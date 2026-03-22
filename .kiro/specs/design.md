@@ -6,7 +6,7 @@ NoEatToStopシステムは、エッジコンピューティングとクラウド
 
 システムは以下の3つの主要コンポーネントで構成される：
 1. **エッジデバイス層**: Docker + IoT Greengrass Core + カスタムコンポーネント（FrameCapture 等）+ カメラ
-2. **クラウド処理層**: KVS + Rekognition/Bedrock + Lambda
+2. **クラウド処理層**: S3 + IoT Core MQTT + Lambda + DynamoDB
 3. **管理・制御層**: Vue.js SPA + CloudFront + S3
 
 ## Architecture
@@ -34,13 +34,11 @@ graph TB
             S3Live["S3 (live-frames/latest.jpg)"]
             FrameLambda["Lambda (getLatestFrame)"]
         end
-        subgraph "認識・分析パイプライン"
-            Rekognition[Amazon Rekognition]
-            Bedrock[Amazon Bedrock Claude]
-            ProcessingLambda[Video Processing Lambda]
+        subgraph "IoT パイプライン"
+            IoTRule["IoT Topic Rule"]
+            TopicRuleLambda["Lambda (handleChewingState / handleTVControl)"]
         end
         subgraph "データ・API"
-            S3Video["S3 (daily/ 映像保存)"]
             DynamoDB[DynamoDB Tables]
             APIGateway[API Gateway]
         end
@@ -69,11 +67,9 @@ graph TB
     FrameCaptureComp -->|"S3 PutObject"| S3Live
     FrameCaptureComp -->|IPC| FutureComp
     FutureComp -->|MQTT| MQTT
-    MQTT --> ProcessingLambda
-
-    ProcessingLambda --> Rekognition
-    ProcessingLambda --> Bedrock
-    ProcessingLambda --> DynamoDB
+    MQTT --> IoTRule
+    IoTRule --> TopicRuleLambda
+    TopicRuleLambda --> DynamoDB
 
     S3Live --> FrameLambda
     FrameLambda -->|"presigned URL"| APIGateway
@@ -323,51 +319,22 @@ noeatstop-videos-{stage}-{account}/
 
 ### 2. Cloud Processing Components
 
-#### Kinesis Video Streams
-- **責任**: エッジからの映像ストリーミング受信
-- **設定**:
-  - ストリーム保持期間: 1日（管理画面で設定変更可能）
-  - 解像度: デフォルト640x360（管理画面で設定変更可能）
-  - フレームレート: 30fps（管理画面で設定変更可能）
-- **インターフェース**: KVS Producer SDK (Python)
-- **エラーハンドリング**: ネットワーク断絶時はエッジ処理のみで継続
-
-#### Video Processing Lambda
-- **責任**: クラウド側での高精度映像解析
-- **技術**: Python 3.9, boto3
+#### IoT Topic Rule → Lambda → DynamoDB パイプライン
+- **責任**: Edge からの MQTT メッセージをクラウド側で永続化
 - **処理フロー**:
-  1. KVSからの映像セグメント取得
-  2. フレーム抽出（1秒間隔）
-  3. Rekognition/Bedrockでの解析
-  4. 結果の統合判定
-  5. 状態更新とエッジへの指示送信
+  1. ChewingAnalyzer / DeviceController が MQTT publish
+  2. IoT Topic Rule がメッセージをフィルタ
+  3. Lambda が DynamoDB に保存（TTL 付き）
+- **トピック**: `noeatstop/{deviceId}/chewing-state`, `noeatstop/{deviceId}/tv-control`
 
-#### Amazon Rekognition Integration
-- **用途**: 基本的な物体・動作検出
-- **機能**:
-  - 顔検出と表情解析
-  - 手の動き検出
-  - 食器・食べ物の認識
-- **API使用**: `detect_labels`, `detect_faces`, `detect_custom_labels`
+#### S3 Event → Lambda → DynamoDB パイプライン
+- **責任**: フレームアップロード時にメタデータを自動記録
+- **処理フロー**: S3 `frames/` prefix に PutObject → Lambda `handleFrameUpload` → FrameHistory テーブル
 
-#### Amazon Bedrock (Claude) Integration
-- **用途**: 複雑な咀嚼行動の詳細解析
-- **優先度**: エッジ処理より高精度なクラウド処理を優先
-- **機能**:
-  - 咀嚼動作の継続時間解析
-  - 複数子供の同時監視
-  - 大人と子供の識別（設定による除外制御）
-  - 誤判定の自動復旧
-- **プロンプト例**:
-  ```
-  この20秒間の映像フレームを分析して、子供の咀嚼状態を判定してください：
-  1. 咀嚼中（継続的な口の動き）
-  2. 咀嚼停止（10秒以上の動作停止）
-  3. 食事終了（食器の片付け）
-  
-  設定：子供数={child_count}、大人検出除外={exclude_adults}
-  判定理由と信頼度も含めて回答してください。
-  ```
+#### API Lambda Functions (14個)
+- **責任**: 管理画面からの CRUD 操作
+- **認証**: 全メソッド CognitoUserPoolsAuthorizer で保護
+- **主要エンドポイント**: meal-session, eating-state, settings, video/latest-frame, chewing-states, tv-control, frame-history, labels
 
 ### 3. Data Management Components
 
@@ -391,7 +358,7 @@ noeatstop-videos-{stage}-{account}/
     "timestamp": "timestamp",
     "state": "eating|not_eating|ended",
     "confidence": "number",
-    "analysisSource": "edge|rekognition|bedrock"
+    "analysisSource": "edge|bedrock"
   }
   ```
 
@@ -503,7 +470,7 @@ interface EatingState {
   timestamp: Date;
   state: 'chewing' | 'chewing_stopped' | 'meal_ended';
   confidence: number; // 0.0 - 1.0
-  analysisSource: 'edge' | 'rekognition' | 'bedrock';
+  analysisSource: 'edge' | 'bedrock';
   metadata: {
     faceDetected: boolean;
     mouthPosition: { x: number, y: number };
@@ -584,8 +551,8 @@ interface TVControlStatus {
 3. **TV制御エラー**: 複数制御方法の試行とログ記録
 
 ### Cloud Processing Error Handling
-1. **KVS接続エラー**: 指数バックオフによる再試行
-2. **Rekognition/Bedrock API制限**: レート制限対応とフォールバック
+1. **MQTT 送信エラー**: IoT Core 接続リトライ
+2. **S3 アップロードエラー**: 次サイクルで再試行
 3. **DynamoDB書き込みエラー**: バッチ処理とデッドレターキュー
 
 ### Error Recovery Strategies
@@ -614,9 +581,9 @@ class ErrorHandler:
 - **Web UI コンポーネント**: Vue Test Utils使用
 
 ### Integration Testing
-- **エッジ-クラウド連携**: KVSを通じた統合テスト
-- **API統合**: DynamoDB、Rekognition、Bedrockとの統合テスト
-- **E2E テスト**: Cypress使用したWeb UIテスト
+- **エッジ-クラウド連携**: MQTT → IoT Topic Rule → Lambda → DynamoDB 統合テスト
+- **API統合**: DynamoDB + S3 presigned URL の統合テスト
+- **E2E テスト**: `edge/e2e-test.sh`（18項目）
 
 ### Performance Testing
 - **映像処理レイテンシ**: エッジ処理時間の測定

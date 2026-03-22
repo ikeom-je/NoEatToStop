@@ -39,9 +39,9 @@
 
 - カメラ映像取得: WebCamera(USB)をEdgeデバイスに接続
 - Edgeデバイス: Raspverrypi (テスト時はMacOS) カメラ映像のエッジ側処理と映像の送信
-- カメラ映像送受信: Amazon Kinesis video stream(KVS)、動画ストリームの送信
-- 映像認識（Edgeデバイス): IoT GreenGrass上でのLocal Lambda でエッジで最低限のオブジェクト検出
-- 映像認識 (AWS側): KVS受信後にAmazon Recognition or Bedrock(Claude / Twelvelabs)を利用
+- カメラ映像送信: Edge から S3 にフレーム画像を直接アップロード（presigned URL で管理画面に配信）
+- 映像認識（Edgeデバイス): IoT Greengrass 上の ChewingAnalyzer（OpenCV Haar Cascade 顔検出 + 口領域差分 + 咀嚼判定）
+- 映像認識 (AWS側): 将来拡張として Amazon Bedrock (Claude) による高精度分析を想定
 - logと監視: Amazon Managed Graphana と QuickSightを利用
 - 映像の保存: Edgeに数秒分の映像保存、AWS側に1食事分の映像を保存
 - 設定の制御や映像確認画面: Vuejs v3 + tailwindcssのSPA を S3において、Cloudfront経由でアクセス

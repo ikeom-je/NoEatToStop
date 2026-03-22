@@ -27,46 +27,34 @@
     - Test error scenarios and configuration validation
     - _Requirements: 3.1, 3.2_
 
-- [ ] 3. Set up Kinesis Video Streams and S3 video storage
-  - [x] 3.1 Create KVS stream and S3 bucket in CDK
-    - Define KVS stream with configurable retention (default 1 day)
-    - Create S3 bucket with lifecycle policies for 1-day video retention
-    - Set up separate S3 storage for judgment images/videos for error analysis
-    - Set up IAM permissions for KVS and S3 access with management screen access control
+- [x] 3. Set up S3 video storage
+  - [x] 3.1 Create S3 bucket in CDK
+    - Create S3 bucket with lifecycle policies for 1-day retention (live-frames, evidence, frames, daily)
+    - Set up IAM permissions for S3 access
     - _Requirements: 3.2, 3.3, 3.5, 3.6_
+    - **注**: KVS は不使用。Edge から S3 直接アップロード方式を採用
 
-  - [x] 3.2 Implement video streaming utilities
-    - Create KVS producer client for edge device with configurable resolution (default 640x360/30fps)
-    - Implement S3 upload functionality for video segments and judgment data
+  - [x] 3.2 Implement S3 upload utilities
+    - Implement S3 upload functionality for frames and judgment data
     - Add error handling for network disconnection (continue edge-only processing)
-    - Implement configurable video buffer duration (default 10 seconds)
     - _Requirements: 3.1, 3.3, 6.3_
 
-- [ ] 4. Develop cloud-based video processing Lambda functions
-  - [x] 4.1 Create video processing Lambda function
-    - Implement KVS consumer to receive video streams with configurable analysis duration (default 20 seconds)
-    - Add frame extraction logic from video segments for chewing analysis
-    - Create integration with Amazon Rekognition for face and mouth detection
-    - Implement multiple children detection and adult exclusion logic
+- [x] 4. Develop API Lambda functions and state management
+  - [x] 4.1 Create API handler Lambda functions
+    - Implement presigned URL 生成 for live-frames and analyzed-frames
+    - Create CRUD handlers for meal sessions, eating states, settings
     - _Requirements: 2.2, 2.3, 2.5_
+    - **注**: Rekognition は不使用。顔検出は Edge の OpenCV Haar Cascade で実装
 
-  - [x] 4.2 Integrate Amazon Bedrock for advanced chewing analysis
-    - Set up Bedrock client with Claude model access prioritized over edge processing
-    - Implement prompt engineering for chewing behavior analysis with configurable parameters
-    - Add confidence scoring and decision logic with 80% default threshold
-    - Implement automatic error recovery for misdetections
-    - _Requirements: 2.2, 2.4_
-
-  - [x] 4.3 Implement state management and DynamoDB integration
+  - [x] 4.2 Implement state management and DynamoDB integration
     - Create functions to update meal session states with chewing duration tracking
     - Implement chewing state history tracking with TV control count
     - Add business logic for state transitions based on chewing stop threshold (default 10 seconds)
-    - Store judgment images/videos for error analysis
+    - Store judgment images for error analysis
     - _Requirements: 1.2, 1.4, 1.5, 3.6_
 
-  - [ ]* 4.4 Write integration tests for video processing
-    - Create test video samples for chewing scenarios with multiple children
-    - Test Rekognition and Bedrock integration with adult exclusion
+  - [ ]* 4.3 Write integration tests
+    - Create test data for chewing scenarios
     - Validate state transition logic with configurable thresholds
     - _Requirements: 2.2, 2.3, 2.4_
 
@@ -212,7 +200,7 @@
 
 - [x] 8. Integrate system components and end-to-end testing
   - [x] 8.1 Connect edge device to cloud services with error handling
-    - Test KVS streaming from Raspberry Pi 3B to cloud with network disconnection scenarios
+    - Test S3 frame upload from Raspberry Pi 3B to cloud with network disconnection scenarios
     - Validate bidirectional communication between edge and cloud with IoT Greengrass
     - Ensure proper error handling (camera failure: no processing, network failure: edge-only processing)
     - Test TV control retry mechanism (1 retry, 3-second interval)

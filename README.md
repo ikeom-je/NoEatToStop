@@ -65,7 +65,7 @@ Greengrass Core (Docker)
 - **ランタイム**: Node.js (ES2020 target)
 - **フロントエンド**: Vue.js v3 + Tailwind CSS
 - **データベース**: Amazon DynamoDB
-- **映像処理**: Amazon Kinesis Video Streams, Rekognition, Bedrock
+- **映像処理**: Edge OpenCV (Haar Cascade 顔検出 + 咀嚼判定) + Amazon Bedrock (将来)
 - **Edge**: AWS IoT Greengrass V2 (Docker、Node.js 22 + Python 3.9 + OpenCV + ffmpeg 統合)
 - **認証**: Amazon Cognito (User Pool + Managed Login + PKCE Authorization Code Flow)
 - **CDN**: Amazon CloudFront（SPA 配信 + HTTPS）
@@ -213,8 +213,7 @@ no-eat-to-stop-system/
 ### Infrastructure Layer (AWS CDK)
 - **S3 Buckets**: Video storage with 1-day lifecycle, judgment data storage, web app hosting
 - **DynamoDB Tables**: MealSessions, EatingStates, SystemSettings, ChewingStates, TVControlEvents, FrameHistory, Labels
-- **Kinesis Video Streams**: Real-time video ingestion from edge devices
-- **Lambda Functions**: Video processing, state management, API handlers
+- **Lambda Functions**: API handlers (14個), IoT Topic Rule handlers, S3 Event handler
 - **API Gateway**: RESTful API for frontend integration（全エンドポイント Cognito Authorizer で保護）
 - **CloudFront**: CDN for web application delivery（SPA フォールバック対応）
 - **Cognito User Pool**: 管理画面認証（PKCE Authorization Code Flow、Managed Login）

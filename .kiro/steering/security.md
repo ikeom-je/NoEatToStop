@@ -89,19 +89,19 @@ new PolicyStatement({
 
 ```typescript
 // ✅ Good: 特定のリソースのみアクセス許可
-const videoProcessorRole = new Role(this, 'VideoProcessorRole', {
+const lambdaRole = new Role(this, 'LambdaRole', {
   assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
   inlinePolicies: {
-    'KVSAccess': new PolicyDocument({
+    'S3Access': new PolicyDocument({
       statements: [
         new PolicyStatement({
           effect: Effect.ALLOW,
           actions: [
-            'kinesisvideo:GetDataEndpoint',
-            'kinesisvideo:GetMedia'
+            's3:GetObject',
+            's3:PutObject'
           ],
           resources: [
-            videoStream.streamArn
+            `${videoBucket.bucketArn}/*`
           ]
         })
       ]
@@ -112,7 +112,7 @@ const videoProcessorRole = new Role(this, 'VideoProcessorRole', {
 // ❌ Bad: 全リソースへのアクセス許可
 new PolicyStatement({
   effect: Effect.ALLOW,
-  actions: ['kinesisvideo:*'],
+  actions: ['s3:*'],
   resources: ['*']
 });
 ```

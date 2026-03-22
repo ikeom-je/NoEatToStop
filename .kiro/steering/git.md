@@ -53,9 +53,9 @@ Closes #234
 ```
 
 ```
-fix(video): prevent memory leak in KVS stream handler
+fix(video): prevent memory leak in S3 presigned URL handler
 
-Lambda was not properly closing KVS connections, causing
+Lambda was not properly closing S3 client connections, causing
 memory accumulation over time. Added explicit cleanup in
 finally block.
 

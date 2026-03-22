@@ -9,8 +9,7 @@
 
 ## AWS Services
 
-- **Video Streaming**: Amazon Kinesis Video Streams (KVS)
-- **Computer Vision**: Amazon Rekognition + Amazon Bedrock (Claude/Twelvelabs)
+- **映像処理**: Edge OpenCV (Haar Cascade 顔検出 + 咀嚼判定)、Amazon Bedrock (将来拡張用)
 - **Storage**: Amazon S3 (video storage and web app hosting)
 - **Database**: Amazon DynamoDB (meal sessions, eating states, system settings)
 - **Edge Computing**: AWS IoT Greengrass (local Lambda functions)

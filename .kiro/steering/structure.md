@@ -31,7 +31,7 @@ no-eat-to-stop-system/
 ### `/lib` - Infrastructure Code
 - Contains CDK stack definitions
 - `no-eat-to-stop-stack.ts` - Main infrastructure stack
-- Defines AWS resources: S3, DynamoDB, Kinesis Video Streams, IAM roles, CloudFront
+- Defines AWS resources: S3, DynamoDB, Cognito, API Gateway, Lambda, IoT Core, CloudFront, IAM roles
 
 ### `/bin` - Application Entry Points
 - CDK application bootstrap files
@@ -53,10 +53,9 @@ The CDK stack creates a multi-stage environment with the following resources:
   - `EatingStates-{stage}`: Real-time eating state records
   - `SystemSettings-{stage}`: Configuration settings
 
-### Streaming & Processing
-- **Kinesis Video Stream**: Real-time video feed from edge devices
-- **Lambda Functions**: Video processing and AI analysis
-- **CloudFront Distribution**: CDN for web application
+### Processing & Delivery
+- **Lambda Functions**: API handlers, IoT Topic Rule handlers, S3 Event handler
+- **CloudFront Distribution**: CDN for web application（SPA フォールバック対応）
 
 ### Security & Access
 - **Cognito User Pool**: 管理画面認証（PKCE Authorization Code Flow、セルフサインアップ無効）
