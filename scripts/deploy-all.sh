@@ -42,11 +42,8 @@ npx cdk deploy "NoEatToStopStack-${STAGE}" \
   --require-approval never \
   --outputs-file "working/cdk-outputs-${STAGE}.json"
 
-# 4. Build and deploy frontend
-echo "[4/4] Building and deploying frontend..."
-cd "$PROJECT_ROOT/frontend"
-
-# CDK outputs から API URL とバケット名を取得
+# 4. Build frontend
+echo "[4/5] Building frontend..."
 OUTPUTS_FILE="$PROJECT_ROOT/working/cdk-outputs-${STAGE}.json"
 
 API_URL=$(node -e "
@@ -55,22 +52,22 @@ API_URL=$(node -e "
   console.log(stack.ApiEndpoint);
 ")
 
-WEBAPP_BUCKET=$(node -e "
-  const data = require('${OUTPUTS_FILE}');
-  const stack = data['NoEatToStopStack-${STAGE}'];
-  console.log(stack.WebAppBucketName);
-")
-
 WEBAPP_URL=$(node -e "
   const data = require('${OUTPUTS_FILE}');
   const stack = data['NoEatToStopStack-${STAGE}'];
   console.log(stack.WebAppUrl);
 ")
 
+cd "$PROJECT_ROOT/frontend"
 VITE_API_BASE_URL="${API_URL}" npm run build
-aws s3 sync dist/ "s3://${WEBAPP_BUCKET}/" --delete --region "${REGION}"
-
 cd "$PROJECT_ROOT"
+
+# 5. Deploy frontend via CDK
+echo "[5/5] Deploying frontend via CDK..."
+npx cdk deploy "NoEatToStopFrontend-${STAGE}" \
+  --context stage="${STAGE}" \
+  --require-approval never \
+  --outputs-file "working/cdk-outputs-${STAGE}.json"
 
 echo ""
 echo "=== Deployment Complete ==="

@@ -29,17 +29,17 @@ API_URL=$(node -e "
   console.log(stack.ApiEndpoint);
 ")
 
-WEBAPP_BUCKET=$(node -e "
-  const data = require('${OUTPUTS_FILE}');
-  const stack = data['NoEatToStopStack-${STAGE}'];
-  console.log(stack.WebAppBucketName);
-")
-
 echo "API URL: $API_URL"
-echo "Bucket: $WEBAPP_BUCKET"
 
+# Build frontend
 cd "$PROJECT_ROOT/frontend"
 VITE_API_BASE_URL="${API_URL}" npm run build
-aws s3 sync dist/ "s3://${WEBAPP_BUCKET}/" --delete --region "${REGION}"
+cd "$PROJECT_ROOT"
+
+# Deploy frontend via CDK
+npx cdk deploy "NoEatToStopFrontend-${STAGE}" \
+  --context stage="${STAGE}" \
+  --require-approval never \
+  --outputs-file "working/cdk-outputs-${STAGE}.json"
 
 echo "Frontend deployed successfully."
