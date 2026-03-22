@@ -67,6 +67,8 @@ Greengrass Core (Docker)
 - **データベース**: Amazon DynamoDB
 - **映像処理**: Amazon Kinesis Video Streams, Rekognition, Bedrock
 - **Edge**: AWS IoT Greengrass V2 (Docker、Node.js 22 + Python 3.9 + OpenCV + ffmpeg 統合)
+- **認証**: Amazon Cognito (User Pool + Managed Login + PKCE Authorization Code Flow)
+- **CDN**: Amazon CloudFront（SPA 配信 + HTTPS）
 - **Docker ランタイム**: Colima (Mac) / Docker Engine (RPi)
 
 ## 前提条件
@@ -122,6 +124,59 @@ docker compose up greengrass-core mediamtx -d --build
 ./start-camera-rpi.sh   # 別ターミナルで実行（Ctrl+C で停止）
 ```
 
+## 認証（Cognito）
+
+管理画面は Amazon Cognito User Pool で保護されている。セルフサインアップは無効で、管理者が AWS CLI でユーザーを招待する。
+
+### ログインフロー
+
+1. CloudFront URL にアクセス → 未認証の場合 Cognito Managed Login にリダイレクト
+2. メール / パスワードでログイン
+3. `/callback` に認可コード付きでリダイレクト → PKCE でトークン交換
+4. ID Token を `localStorage` に保存、API リクエスト時に Bearer ヘッダーとして自動付与
+5. API Gateway の CognitoUserPoolsAuthorizer がトークンを検証
+6. トークン期限切れ時は refresh_token で自動更新、失敗時はログアウト
+
+### 初回ユーザー作成
+
+CDK デプロイ後、`.env.local` の設定値を使ってユーザーを作成する:
+
+```bash
+source .env.local
+
+# ユーザー作成（セルフサインアップは無効）
+aws cognito-idp admin-create-user \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username user@example.com \
+  --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true \
+  --temporary-password 'TempPass123!' \
+  --message-action SUPPRESS
+
+# パスワードを永続化（初回ログイン時の強制変更をスキップ）
+aws cognito-idp admin-set-user-password \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username user@example.com \
+  --password 'YourPassword123!' \
+  --permanent
+```
+
+### 認証関連の環境変数
+
+フロントエンドビルド時に以下の `VITE_COGNITO_*` 変数が必要。`.env.local` に設定すること:
+
+```bash
+# Cognito 設定（CDK デプロイ後に出力される値を設定）
+COGNITO_USER_POOL_ID=ap-northeast-1_xxxxxxxxx
+VITE_COGNITO_DOMAIN=noeatstop-{stage}.auth.{region}.amazoncognito.com
+VITE_COGNITO_CLIENT_ID=<UserPoolClientId>
+VITE_COGNITO_REDIRECT_URI=https://<cloudfront-domain>/callback
+VITE_COGNITO_LOGOUT_URI=https://<cloudfront-domain>/
+```
+
+CDK デプロイ後の Output（`UserPoolId`, `UserPoolClientId`, `CognitoDomainName`）から値を取得できる。
+
+詳細は [設計書](.kiro/specs/design.md) の「認証アーキテクチャ」および [セキュリティ標準](.kiro/steering/security.md) を参照。
+
 ## Project Structure
 
 ```
@@ -157,11 +212,13 @@ no-eat-to-stop-system/
 
 ### Infrastructure Layer (AWS CDK)
 - **S3 Buckets**: Video storage with 1-day lifecycle, judgment data storage, web app hosting
-- **DynamoDB Tables**: MealSessions, EatingStates, SystemSettings with GSI for time-based queries
+- **DynamoDB Tables**: MealSessions, EatingStates, SystemSettings, ChewingStates, TVControlEvents, FrameHistory, Labels
 - **Kinesis Video Streams**: Real-time video ingestion from edge devices
 - **Lambda Functions**: Video processing, state management, API handlers
-- **API Gateway**: RESTful API for frontend integration
-- **CloudFront**: CDN for web application delivery
+- **API Gateway**: RESTful API for frontend integration（全エンドポイント Cognito Authorizer で保護）
+- **CloudFront**: CDN for web application delivery（SPA フォールバック対応）
+- **Cognito User Pool**: 管理画面認証（PKCE Authorization Code Flow、Managed Login）
+- **IoT Core**: MQTT トピックルール → Lambda → DynamoDB パイプライン
 - **IAM Roles**: Least-privilege access for edge devices and Lambda functions
 
 ### Edge Layer (`edge/`)
@@ -211,20 +268,18 @@ The system supports comprehensive runtime configuration through the SystemSettin
 
 The CDK stack creates the following AWS resources:
 
-- **S3 Buckets**: 
-  - Video storage with 1-day lifecycle policy
-  - Judgment data storage for error analysis
+- **S3 Buckets**:
+  - Video storage with 1-day lifecycle policy（live-frames, evidence, frames, daily）
   - Web app hosting with CloudFront distribution
-- **DynamoDB Tables**: 
-  - MealSessions (with GSI for user queries)
-  - EatingStates (with timestamp-based queries)
-  - SystemSettings (configuration management)
-- **Kinesis Video Stream**: Real-time video ingestion
-- **Lambda Functions**: Video processing, state management, API handlers
-- **API Gateway**: RESTful API endpoints
-- **CloudFront Distribution**: Web application CDN
+- **DynamoDB Tables**:
+  - MealSessions, EatingStates, SystemSettings
+  - ChewingStates, TVControlEvents, FrameHistory, Labels（TTL 自動削除）
+- **Cognito**: User Pool, App Client (PKCE), Managed Login Domain, CognitoUserPoolsAuthorizer
+- **Lambda Functions**: API handlers (14個), IoT Topic Rule handlers, S3 Event handler
+- **API Gateway**: RESTful API endpoints（全メソッド Cognito Authorizer 適用）
+- **CloudFront Distribution**: Web application CDN（SPA 404→index.html フォールバック）
 - **IAM Roles**: Edge device role, Lambda execution roles
-- **IoT Core Resources**: Things, Thing Groups, Certificates, Policies
+- **IoT Core Resources**: Things, Thing Groups, Certificates, Policies, Topic Rules
 
 ## Development Commands
 
@@ -414,10 +469,10 @@ Edge 固有の問題（Greengrass、frame-capture、カメラ）については 
   - S3 server-side encryption (SSE-S3)
   - DynamoDB encryption at rest (AWS managed keys)
 - **Video Retention**: Automatic deletion after 1 day via S3 lifecycle policies
-- **Access Control**: Management interface authentication (future implementation)
-- **Network Security**: 
+- **Access Control**: Amazon Cognito User Pool 認証（PKCE Authorization Code Flow + CognitoUserPoolsAuthorizer で全 API 保護）
+- **Network Security**:
   - HTTPS enforcement via CloudFront
-  - API Gateway with IAM authorization
+  - API Gateway with Cognito Authorizer（4XX レスポンスにも CORS ヘッダー付与）
   - IoT Core certificate-based authentication
 
 ## Project Status

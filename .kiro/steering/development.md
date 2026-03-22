@@ -72,6 +72,11 @@
 | `ENVIRONMENT`        | デプロイ環境名               | `dev`        |
 | `FRONTEND_URL`       | デプロイ後のフロントエンドURL | (デプロイ後に設定) |
 | `API_GATEWAY_URL`    | デプロイ後のAPI Gateway URL  | (デプロイ後に設定) |
+| `COGNITO_USER_POOL_ID` | Cognito User Pool ID（ユーザー管理用） | (CDK output `UserPoolId`) |
+| `VITE_COGNITO_DOMAIN` | Cognito Managed Login ドメイン | `noeatstop-dev.auth.ap-northeast-1.amazoncognito.com` |
+| `VITE_COGNITO_CLIENT_ID` | Cognito App Client ID | (CDK output `UserPoolClientId`) |
+| `VITE_COGNITO_REDIRECT_URI` | 認証コールバック URL | `https://<cloudfront-domain>/callback` |
+| `VITE_COGNITO_LOGOUT_URI` | ログアウト後リダイレクト URL | `https://<cloudfront-domain>/` |
 
 ### 使い方
 
@@ -385,6 +390,45 @@ npm run deploy:all
 
 **重要**: CDKが自動的にTypeScriptをビルドします。事前のビルドは不要です。
 
+### 認証設定（CDK デプロイ後）
+
+CDK デプロイ後、Cognito の設定値を `.env.local` に追記する:
+
+```bash
+# CDK outputs から Cognito 設定を取得
+aws cloudformation describe-stacks --stack-name NoEatToStopStack-${ENVIRONMENT:-dev} \
+  --query 'Stacks[0].Outputs[?contains(OutputKey,`UserPool`) || contains(OutputKey,`Cognito`)]' \
+  --output table
+
+# 出力された UserPoolId, UserPoolClientId, CognitoDomainName を .env.local に設定
+```
+
+### ユーザー管理
+
+```bash
+source .env.local
+
+# ユーザー作成（セルフサインアップは無効）
+aws cognito-idp admin-create-user \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username user@example.com \
+  --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true \
+  --temporary-password 'TempPass123!' \
+  --message-action SUPPRESS
+
+# パスワードを永続化（初回ログイン時の強制変更をスキップ）
+aws cognito-idp admin-set-user-password \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username user@example.com \
+  --password 'YourPassword123!' \
+  --permanent
+
+# ユーザー削除
+aws cognito-idp admin-delete-user \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username user@example.com
+```
+
 ## トラブルシューティング
 
 ### よくある問題
@@ -399,6 +443,9 @@ npm run deploy:all
 | Docker コマンドが使えない                    | `docker context use colima`              |
 | Greengrass コンテナが起動しない              | `docker logs gg-dev-core` でログ確認     |
 | コンテナ内でファイルが見つからない           | ボリュームマウントのパスを確認           |
+| ログイン画面にリダイレクトされない           | `.env.local` の `VITE_COGNITO_DOMAIN` が未設定、またはビルド時に渡されていない |
+| ログイン後 /callback で白画面               | `VITE_COGNITO_REDIRECT_URI` が Cognito App Client の許可済み URL と一致しない |
+| API が 401 Unauthorized を返す              | ID Token の有効期限切れ、または `VITE_COGNITO_CLIENT_ID` が不正 |
 
 ### Colima 関連のトラブルシューティング
 
