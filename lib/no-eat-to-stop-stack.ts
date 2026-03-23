@@ -625,9 +625,23 @@ export class NoEatToStopStack extends cdk.Stack {
       memorySize: 128,
     });
 
+    const deleteLabelFn = new lambda.Function(this, 'DeleteLabelHandler', {
+      functionName: `noeatstop-delete-label-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.deleteLabel',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: labelsEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
     const labelsResource = this.api.root.addResource('labels');
     labelsResource.addMethod('POST', new apigateway.LambdaIntegration(saveLabelFn), authMethodOptions);
     labelsResource.addMethod('GET', new apigateway.LambdaIntegration(getLabelsFn), authMethodOptions);
+    labelsResource.addMethod('DELETE', new apigateway.LambdaIntegration(deleteLabelFn), authMethodOptions);
 
     // Frame Change Events API (エビデンス画像一覧)
     const frameChangeEnv = {

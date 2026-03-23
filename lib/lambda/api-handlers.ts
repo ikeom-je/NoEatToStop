@@ -496,7 +496,8 @@ export async function getFrameHistory(event: APIGatewayProxyEvent): Promise<APIG
 }
 
 /**
- * POST /labels — 検出画像に対するラベリングデータを保存
+ * POST /labels — 検出画像に対するラベリングデータを保存（複数ラベル対応）
+ * labels を DynamoDB StringSet として ADD で追加する
  */
 export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
@@ -510,21 +511,58 @@ export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGateway
       return response(400, { error: 'epochMs and label are required' });
     }
 
-    const item: Record<string, { S: string } | { N: string }> = {
-      deviceId: { S: String(deviceId || 'noeatstop-edge-device') },
-      epochMs: { N: String(epochMs) },
-      s3Key: { S: String(s3Key || '') },
-      label: { S: String(label) },
-      state: { S: String(state || '') },
-      confidence: { N: String(confidence ?? 0) },
-      motionScore: { N: String(motionScore ?? 0) },
-      facesDetected: { N: String(facesDetected ?? 0) },
-      labeledAt: { S: new Date().toISOString() },
-      expiresAt: { N: String(Math.floor(Date.now() / 1000) + 90 * 86400) },
-    };
-
-    await ddbClient.send(new PutItemCommand({ TableName: tableName, Item: item }));
+    await ddbClient.send(new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        deviceId: { S: String(deviceId || 'noeatstop-edge-device') },
+        epochMs: { N: String(epochMs) },
+      },
+      UpdateExpression: 'ADD labels :lbl SET s3Key = :s3, #st = :state, confidence = :conf, motionScore = :ms, facesDetected = :fd, labeledAt = :la, expiresAt = :ex',
+      ExpressionAttributeNames: { '#st': 'state' },
+      ExpressionAttributeValues: {
+        ':lbl': { SS: [String(label)] },
+        ':s3': { S: String(s3Key || '') },
+        ':state': { S: String(state || '') },
+        ':conf': { N: String(confidence ?? 0) },
+        ':ms': { N: String(motionScore ?? 0) },
+        ':fd': { N: String(facesDetected ?? 0) },
+        ':la': { S: new Date().toISOString() },
+        ':ex': { N: String(Math.floor(Date.now() / 1000) + 90 * 86400) },
+      },
+    }));
     return response(201, { message: 'Label saved', epochMs, label });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}
+
+/**
+ * DELETE /labels — 指定ラベルを削除
+ */
+export async function deleteLabel(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.LABELS_TABLE;
+    if (!tableName) return response(500, { error: 'LABELS_TABLE not configured' });
+
+    const body = JSON.parse(event.body || '{}');
+    const { deviceId, epochMs, label } = body;
+
+    if (!epochMs || !label) {
+      return response(400, { error: 'epochMs and label are required' });
+    }
+
+    await ddbClient.send(new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        deviceId: { S: String(deviceId || 'noeatstop-edge-device') },
+        epochMs: { N: String(epochMs) },
+      },
+      UpdateExpression: 'DELETE labels :lbl',
+      ExpressionAttributeValues: {
+        ':lbl': { SS: [String(label)] },
+      },
+    }));
+    return response(200, { message: 'Label removed', epochMs, label });
   } catch (err) {
     return response(500, { error: (err as Error).message });
   }
@@ -553,7 +591,7 @@ export async function getLabels(event: APIGatewayProxyEvent): Promise<APIGateway
       deviceId: item.deviceId?.S,
       epochMs: Number(item.epochMs?.N),
       s3Key: item.s3Key?.S,
-      label: item.label?.S,
+      labels: item.labels?.SS || (item.label?.S ? [item.label.S] : []),
       state: item.state?.S,
       confidence: Number(item.confidence?.N),
       motionScore: Number(item.motionScore?.N),

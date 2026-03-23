@@ -172,7 +172,7 @@ export interface LabelRecord {
   deviceId: string;
   epochMs: number;
   s3Key: string;
-  label: string;
+  labels: string[];
   state: string;
   confidence: number;
   motionScore: number;
@@ -192,6 +192,14 @@ export const labelsApi = {
     deviceId?: string;
   }): Promise<void> {
     await apiClient.post('/labels', data);
+  },
+
+  async remove(data: {
+    epochMs: number;
+    label: string;
+    deviceId?: string;
+  }): Promise<void> {
+    await apiClient.delete('/labels', { data });
   },
 
   async getRecent(deviceId?: string, limit?: number): Promise<LabelRecord[]> {
