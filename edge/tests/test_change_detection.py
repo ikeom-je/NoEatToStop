@@ -121,7 +121,7 @@ class TestConditionalUpload(unittest.TestCase):
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         faces = np.array([[100, 100, 200, 200]])
 
-        self.analyzer._upload_frame_history(frame, "chewing", 600.0, 1, 0.5)
+        self.analyzer._upload_frame_history(frame, faces, "chewing", 600.0, 1, 0.5)
         self.analyzer.s3.put_object.assert_called_once()
 
         call_args = self.analyzer.s3.put_object.call_args

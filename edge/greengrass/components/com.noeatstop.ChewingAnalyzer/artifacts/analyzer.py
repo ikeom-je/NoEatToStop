@@ -269,7 +269,7 @@ class ChewingAnalyzer:
 
             # 変化時のみフレーム履歴をアップロード
             if changed:
-                self._upload_frame_history(frame, new_state, motion_score, len(faces), confidence)
+                self._upload_frame_history(frame, faces, new_state, motion_score, len(faces), confidence)
                 if change_type:
                     self._publish_frame_change(change_type, motion_score, len(faces), new_state)
 
@@ -316,7 +316,7 @@ class ChewingAnalyzer:
 
         # 変化時のみフレーム履歴をアップロード
         if changed:
-            self._upload_frame_history(frame, new_state, avg_motion, len(faces), confidence)
+            self._upload_frame_history(frame, faces, new_state, avg_motion, len(faces), confidence)
             if change_type:
                 self._publish_frame_change(change_type, motion_score, len(faces), new_state)
 
@@ -375,15 +375,48 @@ class ChewingAnalyzer:
 
         return round(min(face_confidence + frame_confidence + decision_confidence, 1.0), 3)
 
+    def _annotate_frame(
+        self,
+        frame: np.ndarray,
+        faces: np.ndarray,
+        state: str,
+        motion_score: float,
+        confidence: float,
+    ) -> np.ndarray:
+        """フレームにBB・状態・スコアをオーバーレイ描画"""
+        annotated = frame.copy()
+
+        color_map = {
+            self.STATE_CHEWING: (0, 255, 0),
+            self.STATE_STOPPED: (0, 255, 255),
+            self.STATE_ENDED: (0, 0, 255),
+            self.STATE_WAITING: (128, 128, 128),
+        }
+        color = color_map.get(state, (255, 255, 255))
+
+        for fx, fy, fw, fh in faces:
+            # 顔バウンディングボックス
+            cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
+            # 口領域
+            mouth_y = int(fy + fh * (1 - self.mouth_ratio))
+            cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
+
+        # 状態・スコア・confidenceのテキスト表示
+        label = f"{state} motion:{int(motion_score)} conf:{confidence:.2f}"
+        cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        return annotated
+
     def _upload_frame_history(
         self,
         frame: np.ndarray,
+        faces: np.ndarray,
         state: str,
         motion_score: float,
         faces_count: int,
         confidence: float,
     ):
-        """変化検知時のみ: タイムスタンプ付きフレームを S3 frames/ にアップロード"""
+        """変化検知時のみ: BB付きフレームを S3 frames/ にアップロード"""
         if not self.s3 or not S3_BUCKET:
             return
 
@@ -393,7 +426,8 @@ class ChewingAnalyzer:
             epoch_ms = int(now.timestamp() * 1000)
             s3_key = f"frames/{THING_NAME}/{date_str}/{epoch_ms}.jpg"
 
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            annotated = self._annotate_frame(frame, faces, state, motion_score, confidence)
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
 
             self.s3.put_object(
                 Bucket=S3_BUCKET,
@@ -598,29 +632,7 @@ class ChewingAnalyzer:
             return
 
         try:
-            annotated = frame.copy()
-
-            # 状態に応じた色: chewing=緑, stopped=黄, ended=赤
-            color_map = {
-                self.STATE_CHEWING: (0, 255, 0),
-                self.STATE_STOPPED: (0, 255, 255),
-                self.STATE_ENDED: (0, 0, 255),
-                self.STATE_WAITING: (128, 128, 128),
-            }
-            color = color_map.get(state, (255, 255, 255))
-
-            for fx, fy, fw, fh in faces:
-                # 顔バウンディングボックス
-                cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
-                # 口領域
-                mouth_y = int(fy + fh * (1 - self.mouth_ratio))
-                cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
-
-            # 状態とスコアとconfidenceのテキスト表示
-            label = f"{state} motion:{int(motion_score)} conf:{confidence:.2f}"
-            cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-            # JPEG エンコード
+            annotated = self._annotate_frame(frame, faces, state, motion_score, confidence)
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
             self.s3.put_object(

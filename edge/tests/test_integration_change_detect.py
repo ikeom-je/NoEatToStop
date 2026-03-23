@@ -86,7 +86,7 @@ class TestIntegrationNoFaceNoUpload(unittest.TestCase):
             else:
                 analyzer._upload_frame_history(
                     np.zeros((480, 640, 3), dtype=np.uint8),
-                    "meal_ended", 0.0, 0, 0.0,
+                    faces, "meal_ended", 0.0, 0, 0.0,
                 )
             analyzer.prev_faces_detected = len(faces) > 0
 
@@ -111,7 +111,7 @@ class TestIntegrationFaceAppearUpload(unittest.TestCase):
 
         # アップロード実行
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        analyzer._upload_frame_history(frame, "chewing", 600.0, 1, 0.5)
+        analyzer._upload_frame_history(frame, faces, "chewing", 600.0, 1, 0.5)
         analyzer._publish_frame_change("face_detected", 600.0, 1, "chewing")
 
         # S3アップロードされた
@@ -165,7 +165,7 @@ class TestIntegrationFacePresentLargeDiff(unittest.TestCase):
 
         # アップロード + MQTT
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        analyzer._upload_frame_history(frame, "chewing", motion_score, 1, 0.7)
+        analyzer._upload_frame_history(frame, faces, "chewing", motion_score, 1, 0.7)
         analyzer._publish_frame_change("pixel_diff", motion_score, 1, "chewing")
 
         analyzer.s3.put_object.assert_called_once()
@@ -204,7 +204,7 @@ class TestIntegrationStateChangeUpload(unittest.TestCase):
 
         # アップロード
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        analyzer._upload_frame_history(frame, new_state, motion_score, 1, 0.3)
+        analyzer._upload_frame_history(frame, faces, new_state, motion_score, 1, 0.3)
         analyzer._publish_frame_change(change_type, motion_score, 1, new_state)
 
         analyzer.s3.put_object.assert_called_once()
