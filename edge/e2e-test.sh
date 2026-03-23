@@ -149,13 +149,19 @@ else
   fail "TV 制御イベント API エラー (HTTP $TV_RESP)"
 fi
 
-# 15. S3 フレーム履歴アップロード確認
+# 15. S3 フレーム履歴アップロード確認（変化検知有効時は変化時のみアップロード）
 echo "[15] S3 フレーム履歴アップロード確認"
 FRAME_COUNT=$(aws s3 ls "s3://$VIDEO_BUCKET/frames/" --recursive --region "$REGION" 2>/dev/null | wc -l)
 if [ "$FRAME_COUNT" -gt 0 ] 2>/dev/null; then
   pass "S3 frames/ にフレーム履歴が存在 (${FRAME_COUNT} 枚)"
 else
-  fail "S3 frames/ にフレーム履歴が見つかりません"
+  # 変化検知が有効な場合、変化がなければフレーム履歴はアップロードされない（正常動作）
+  CHANGE_DETECT=$(docker exec noeatstop-gg-core printenv CHANGE_DETECTION_ENABLED 2>/dev/null || echo "")
+  if [ "$CHANGE_DETECT" = "true" ]; then
+    pass "S3 frames/ にフレーム履歴なし（変化検知有効: 変化なしのため正常）"
+  else
+    fail "S3 frames/ にフレーム履歴が見つかりません"
+  fi
 fi
 
 # 16. FrameHistory DynamoDB 確認
