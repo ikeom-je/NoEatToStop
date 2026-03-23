@@ -133,6 +133,15 @@ export class NoEatToStopStack extends cdk.Stack {
       timeToLiveAttribute: 'expiresAt',
     });
 
+    const frameChangeEventsTable = new dynamodb.Table(this, 'FrameChangeEventsTable', {
+      tableName: `FrameChangeEvents-${stage}`,
+      partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'epochSeconds', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'expiresAt',
+    });
+
     this.chewingStatesTable = new dynamodb.Table(this, 'ChewingStatesTable', {
       tableName: `ChewingStates-${stage}`,
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
@@ -619,6 +628,29 @@ export class NoEatToStopStack extends cdk.Stack {
     labelsResource.addMethod('POST', new apigateway.LambdaIntegration(saveLabelFn), authMethodOptions);
     labelsResource.addMethod('GET', new apigateway.LambdaIntegration(getLabelsFn), authMethodOptions);
 
+    // Frame Change Events API (エビデンス画像一覧)
+    const frameChangeEnv = {
+      ...lambdaEnv,
+      FRAME_CHANGE_EVENTS_TABLE: frameChangeEventsTable.tableName,
+      VIDEO_BUCKET: this.videoBucket.bucketName,
+    };
+
+    const getFrameChangeEventsFn = new lambda.Function(this, 'GetFrameChangeEventsHandler', {
+      functionName: `noeatstop-get-frame-changes-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.getFrameChangeEvents',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: frameChangeEnv,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    const frameChangesResource = this.api.root.addResource('frame-changes');
+    frameChangesResource.addMethod('GET', new apigateway.LambdaIntegration(getFrameChangeEventsFn), authMethodOptions);
+
     // ========================================
     // CloudFront Distribution
     // ========================================
@@ -770,6 +802,48 @@ export class NoEatToStopStack extends cdk.Stack {
         ],
         ruleDisabled: false,
         description: 'DeviceController の TV 制御イベントを DynamoDB に保存',
+      },
+    });
+
+    // ========================================
+    // IoT Topic Rule → Lambda → DynamoDB (Frame Change Events)
+    // ========================================
+
+    const frameChangeHandlerFn = new lambda.Function(this, 'FrameChangeEventHandler', {
+      functionName: `noeatstop-frame-change-handler-${stage}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/lib/lambda/api-handlers.handleFrameChange',
+      code: lambda.Code.fromAsset('.', {
+        exclude: ['node_modules', 'cdk.out', 'test', 'frontend', '.git'],
+      }),
+      role: lambdaExecutionRole,
+      environment: {
+        ...lambdaEnv,
+        FRAME_CHANGE_EVENTS_TABLE: frameChangeEventsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+    });
+
+    frameChangeHandlerFn.addPermission('IoTRuleInvokeFrameChange', {
+      principal: new iam.ServicePrincipal('iot.amazonaws.com'),
+      sourceArn: `arn:aws:iot:${this.region}:${this.account}:rule/noeatstop_frame_change_${stage}`,
+    });
+
+    new iot.CfnTopicRule(this, 'FrameChangeRule', {
+      ruleName: `noeatstop_frame_change_${stage}`,
+      topicRulePayload: {
+        sql: "SELECT * FROM 'noeatstop/+/frame-change'",
+        awsIotSqlVersion: '2016-03-23',
+        actions: [
+          {
+            lambda: {
+              functionArn: frameChangeHandlerFn.functionArn,
+            },
+          },
+        ],
+        ruleDisabled: false,
+        description: 'ChewingAnalyzer のフレーム変化イベントを DynamoDB に保存',
       },
     });
 
@@ -1018,6 +1092,11 @@ export class NoEatToStopStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'FrameHistoryTableName', {
       value: this.frameHistoryTable.tableName,
       description: 'FrameHistory DynamoDB table name (TTL enabled)',
+    });
+
+    new cdk.CfnOutput(this, 'FrameChangeEventsTableName', {
+      value: frameChangeEventsTable.tableName,
+      description: 'FrameChangeEvents DynamoDB table name (TTL enabled)',
     });
   }
 }

@@ -13,6 +13,7 @@ const navItems = [
   { path: '/tv-control', label: 'TV制御' },
   { path: '/chewing-states', label: '咀嚼状態' },
   { path: '/error-analysis', label: 'エラー分析' },
+  { path: '/evidence', label: 'エビデンス' },
   { path: '/emergency', label: '緊急制御' },
 ];
 </script>

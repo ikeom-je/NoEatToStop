@@ -566,3 +566,94 @@ export async function getLabels(event: APIGatewayProxyEvent): Promise<APIGateway
     return response(500, { error: (err as Error).message });
   }
 }
+
+/**
+ * IoT Rule から呼び出される Lambda ハンドラー
+ * フレーム変化イベントを FrameChangeEvents DynamoDB テーブルに保存
+ */
+export async function handleFrameChange(event: Record<string, unknown>): Promise<void> {
+  const tableName = process.env.FRAME_CHANGE_EVENTS_TABLE;
+  if (!tableName) {
+    console.error('FRAME_CHANGE_EVENTS_TABLE not configured');
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const epochSeconds = typeof event.timestamp === 'string'
+    ? Math.floor(new Date(event.timestamp as string).getTime() / 1000)
+    : now;
+  const expiresAt = epochSeconds + 7 * 86400; // 7日保持
+
+  const details = (event.details || {}) as Record<string, unknown>;
+
+  const item: Record<string, { S: string } | { N: string }> = {
+    deviceId: { S: String(event.deviceId || 'unknown') },
+    epochSeconds: { N: String(epochSeconds) },
+    changeType: { S: String(event.changeType || '') },
+    s3Key: { S: String(event.s3Key || '') },
+    diffScore: { N: String(details.diffScore ?? 0) },
+    facesDetected: { N: String(details.facesDetected ?? 0) },
+    chewingState: { S: String(details.chewingState || '') },
+    timestamp: { S: String(event.timestamp || new Date().toISOString()) },
+    expiresAt: { N: String(expiresAt) },
+  };
+
+  await ddbClient.send(new PutItemCommand({
+    TableName: tableName,
+    Item: item,
+  }));
+
+  console.log(`FrameChange saved: ${event.changeType} (device=${event.deviceId}, s3Key=${event.s3Key})`);
+}
+
+/**
+ * GET /frame-changes — フレーム変化イベント一覧（presigned URL付き）
+ */
+export async function getFrameChangeEvents(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  try {
+    const tableName = process.env.FRAME_CHANGE_EVENTS_TABLE;
+    if (!tableName) return response(500, { error: 'FRAME_CHANGE_EVENTS_TABLE not configured' });
+
+    const deviceId = event.queryStringParameters?.deviceId || 'noeatstop-edge-device';
+    const limit = Math.min(Number(event.queryStringParameters?.limit) || 50, 500);
+
+    const result = await ddbClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'deviceId = :d',
+      ExpressionAttributeValues: { ':d': { S: deviceId } },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+
+    const bucket = process.env.VIDEO_BUCKET;
+    const items = await Promise.all((result.Items || []).map(async (item) => {
+      const s3Key = item.s3Key?.S || '';
+      let evidenceUrl = '';
+      if (bucket && s3Key) {
+        try {
+          evidenceUrl = await getSignedUrl(
+            s3Client,
+            new GetObjectCommand({ Bucket: bucket, Key: s3Key }),
+            { expiresIn: 3600 },
+          );
+        } catch { /* presigned URL 生成失敗は無視 */ }
+      }
+
+      return {
+        deviceId: item.deviceId?.S,
+        epochSeconds: Number(item.epochSeconds?.N),
+        changeType: item.changeType?.S,
+        s3Key,
+        evidenceUrl,
+        diffScore: Number(item.diffScore?.N),
+        facesDetected: Number(item.facesDetected?.N),
+        chewingState: item.chewingState?.S,
+        timestamp: item.timestamp?.S,
+      };
+    }));
+
+    return response(200, { items, count: items.length });
+  } catch (err) {
+    return response(500, { error: (err as Error).message });
+  }
+}

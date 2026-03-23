@@ -50,6 +50,11 @@ const router = createRouter({
       name: 'chewing-states',
       component: () => import('@/components/ChewingStates.vue'),
     },
+    {
+      path: '/evidence',
+      name: 'evidence',
+      component: () => import('@/components/EvidenceAnalysis.vue'),
+    },
   ],
 });
 
