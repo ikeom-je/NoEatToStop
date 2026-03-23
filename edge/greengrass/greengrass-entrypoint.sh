@@ -142,7 +142,8 @@ run_frame_capture() {
   echo "Starting FrameCapture process..."
   export RTSP_URL="${RTSP_URL:-rtsp://noeatstop-mediamtx:8554/camera}"
   export S3_BUCKET="${VIDEO_BUCKET}"
-  export CAPTURE_INTERVAL="${CAPTURE_INTERVAL:-3}"
+  export CAPTURE_INTERVAL="${CAPTURE_INTERVAL:-1}"
+  export LIVE_FRAME_INTERVAL="${LIVE_FRAME_INTERVAL:-3}"
   export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
 
   cd "${FRAME_CAPTURE_WORK}" && node capture.js &

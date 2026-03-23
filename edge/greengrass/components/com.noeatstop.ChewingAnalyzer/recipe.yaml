@@ -17,6 +17,9 @@ ComponentConfiguration:
     pauseThreshold: "10"
     # エビデンス
     evidenceOnStateChange: "true"
+    # 変化検知
+    changeDetectionEnabled: "true"
+    pixelDiffThreshold: "300"
 Manifests:
   - Platform:
       os: linux
@@ -35,6 +38,8 @@ Manifests:
         export ANALYSIS_FRAME_COUNT="{configuration:/analysisFrameCount}"
         export PAUSE_THRESHOLD="{configuration:/pauseThreshold}"
         export EVIDENCE_ON_STATE_CHANGE="{configuration:/evidenceOnStateChange}"
+        export CHANGE_DETECTION_ENABLED="{configuration:/changeDetectionEnabled}"
+        export PIXEL_DIFF_THRESHOLD="{configuration:/pixelDiffThreshold}"
         python3 analyzer.py
     Artifacts:
       - URI: "file:///opt/greengrass-components/com.noeatstop.ChewingAnalyzer/artifacts/"

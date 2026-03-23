@@ -3,7 +3,7 @@ ChewingAnalyzer — 軽量な顔検出・咀嚼判定コンポーネント
 
 FrameCapture が書き出す JPEG フレームを監視し、
 OpenCV Haar Cascade で顔検出 → 口領域の差分量で咀嚼判定を行う。
-状態変化時にエビデンス画像を S3 にアップロードする。
+変化検知時のみエビデンス画像を S3 にアップロードし、MQTT で通知する。
 
 MQTT 通知・TV 制御コマンド連携を含む。
 """
@@ -43,10 +43,15 @@ ANALYSIS_FRAME_COUNT = int(os.environ.get("ANALYSIS_FRAME_COUNT", "5"))
 PAUSE_THRESHOLD = float(os.environ.get("PAUSE_THRESHOLD", "10"))
 EVIDENCE_ON_STATE_CHANGE = os.environ.get("EVIDENCE_ON_STATE_CHANGE", "true").lower() == "true"
 
+# 変化検知パラメータ
+CHANGE_DETECTION_ENABLED = os.environ.get("CHANGE_DETECTION_ENABLED", "true").lower() == "true"
+PIXEL_DIFF_THRESHOLD = float(os.environ.get("PIXEL_DIFF_THRESHOLD", "300"))
+
 # MQTT 設定
 THING_NAME = os.environ.get("THING_NAME", "noeatstop-edge-device")
 IOT_ENDPOINT = os.environ.get("IOT_ENDPOINT", "")
 MQTT_TOPIC = f"noeatstop/{THING_NAME}/chewing-state"
+MQTT_FRAME_CHANGE_TOPIC = f"noeatstop/{THING_NAME}/frame-change"
 
 # ポーリング間隔（FrameCapture の CAPTURE_INTERVAL に合わせる）
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "0.5"))
@@ -102,6 +107,11 @@ class ChewingAnalyzer:
         self.tv_off_sent = False  # TV OFF コマンド送信済みフラグ
         self.settings_mtime = 0.0  # 設定ファイルの最終更新時刻
 
+        # 変化検知状態
+        self.prev_faces_detected = False
+        self.change_detection_enabled = CHANGE_DETECTION_ENABLED
+        self.pixel_diff_threshold = PIXEL_DIFF_THRESHOLD
+
         # 動的パラメータ（設定ファイルで上書き可能）
         self.chewing_threshold = CHEWING_MOTION_THRESHOLD
         self.face_scale = FACE_DETECTION_SCALE
@@ -111,12 +121,15 @@ class ChewingAnalyzer:
 
         log.info(
             "ChewingAnalyzer 初期化完了: threshold=%.0f, scale=%.1f, "
-            "mouth_ratio=%.2f, frames=%d, pause=%.0fs",
+            "mouth_ratio=%.2f, frames=%d, pause=%.0fs, "
+            "change_detection=%s, pixel_diff_threshold=%.0f",
             self.chewing_threshold,
             self.face_scale,
             self.mouth_ratio,
             self.analysis_frames,
             self.pause_threshold,
+            self.change_detection_enabled,
+            self.pixel_diff_threshold,
         )
 
     def run(self):
@@ -161,6 +174,8 @@ class ChewingAnalyzer:
                 "mouthRoiRatio": ("mouth_ratio", float),
                 "analysisFrameCount": ("analysis_frames", int),
                 "pauseThreshold": ("pause_threshold", float),
+                "changeDetectionEnabled": ("change_detection_enabled", lambda v: str(v).lower() == "true"),
+                "pixelDiffThreshold": ("pixel_diff_threshold", float),
             }
             for key, (attr, conv) in mapping.items():
                 if key in settings:
@@ -174,12 +189,15 @@ class ChewingAnalyzer:
             if changed:
                 log.info(
                     "設定リロード完了: threshold=%.0f, scale=%.1f, "
-                    "mouth_ratio=%.2f, frames=%d, pause=%.0fs",
+                    "mouth_ratio=%.2f, frames=%d, pause=%.0fs, "
+                    "change_detection=%s, pixel_diff=%.0f",
                     self.chewing_threshold,
                     self.face_scale,
                     self.mouth_ratio,
                     self.analysis_frames,
                     self.pause_threshold,
+                    self.change_detection_enabled,
+                    self.pixel_diff_threshold,
                 )
         except Exception:
             log.exception("設定ファイル読み込みエラー")
@@ -194,6 +212,28 @@ class ChewingAnalyzer:
             self.last_mtime = mtime
             return True
         return False
+
+    def _detect_change(self, faces, motion_score: float) -> tuple:
+        """フレーム変化を検知し、変化タイプを返す。
+
+        Returns:
+            (changed: bool, change_type: str or None)
+        """
+        if not self.change_detection_enabled:
+            return True, None
+
+        has_faces = len(faces) > 0
+
+        # 顔検出有無の変化
+        if has_faces != self.prev_faces_detected:
+            change_type = "face_detected" if has_faces else "face_lost"
+            return True, change_type
+
+        # 顔検出領域（口元）の差分が閾値超
+        if has_faces and motion_score > self.pixel_diff_threshold:
+            return True, "pixel_diff"
+
+        return False, None
 
     def _process_frame(self):
         """1フレームを分析"""
@@ -219,9 +259,20 @@ class ChewingAnalyzer:
             new_state = self.STATE_ENDED
             motion_score = 0.0
             confidence = 0.0
+
+            # 変化検知
+            changed, change_type = self._detect_change(faces, motion_score)
+            self.prev_faces_detected = False
+
             self._update_state(new_state, motion_score, frame, faces, confidence)
             self._upload_analyzed_frame(frame, faces, new_state, motion_score, confidence)
-            self._upload_frame_history(frame, new_state, motion_score, len(faces), confidence)
+
+            # 変化時のみフレーム履歴をアップロード
+            if changed:
+                self._upload_frame_history(frame, faces, new_state, motion_score, len(faces), confidence)
+                if change_type:
+                    self._publish_frame_change(change_type, motion_score, len(faces), new_state)
+
             self.prev_mouth_roi = None
             return
 
@@ -251,9 +302,24 @@ class ChewingAnalyzer:
             new_state, avg_motion, fw, fh, frame_w, frame_h
         )
 
+        # 変化検知（口元差分ベース）
+        changed, change_type = self._detect_change(faces, motion_score)
+        self.prev_faces_detected = True
+
+        # 咀嚼状態変化も変化イベントとして扱う
+        if new_state != self.current_state:
+            changed = True
+            change_type = "chewing_state_change"
+
         self._update_state(new_state, avg_motion, frame, faces, confidence)
         self._upload_analyzed_frame(frame, faces, new_state, avg_motion, confidence)
-        self._upload_frame_history(frame, new_state, avg_motion, len(faces), confidence)
+
+        # 変化時のみフレーム履歴をアップロード
+        if changed:
+            self._upload_frame_history(frame, faces, new_state, avg_motion, len(faces), confidence)
+            if change_type:
+                self._publish_frame_change(change_type, motion_score, len(faces), new_state)
+
         self.prev_mouth_roi = mouth_roi.copy()
 
     def _calculate_motion(self, mouth_roi: np.ndarray) -> float:
@@ -309,15 +375,48 @@ class ChewingAnalyzer:
 
         return round(min(face_confidence + frame_confidence + decision_confidence, 1.0), 3)
 
+    def _annotate_frame(
+        self,
+        frame: np.ndarray,
+        faces: np.ndarray,
+        state: str,
+        motion_score: float,
+        confidence: float,
+    ) -> np.ndarray:
+        """フレームにBB・状態・スコアをオーバーレイ描画"""
+        annotated = frame.copy()
+
+        color_map = {
+            self.STATE_CHEWING: (0, 255, 0),
+            self.STATE_STOPPED: (0, 255, 255),
+            self.STATE_ENDED: (0, 0, 255),
+            self.STATE_WAITING: (128, 128, 128),
+        }
+        color = color_map.get(state, (255, 255, 255))
+
+        for fx, fy, fw, fh in faces:
+            # 顔バウンディングボックス
+            cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
+            # 口領域
+            mouth_y = int(fy + fh * (1 - self.mouth_ratio))
+            cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
+
+        # 状態・スコア・confidenceのテキスト表示
+        label = f"{state} motion:{int(motion_score)} conf:{confidence:.2f}"
+        cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        return annotated
+
     def _upload_frame_history(
         self,
         frame: np.ndarray,
+        faces: np.ndarray,
         state: str,
         motion_score: float,
         faces_count: int,
         confidence: float,
     ):
-        """タイムスタンプ付きフレームを S3 frames/ にアップロード（フレーム履歴用）"""
+        """変化検知時のみ: BB付きフレームを S3 frames/ にアップロード"""
         if not self.s3 or not S3_BUCKET:
             return
 
@@ -327,7 +426,8 @@ class ChewingAnalyzer:
             epoch_ms = int(now.timestamp() * 1000)
             s3_key = f"frames/{THING_NAME}/{date_str}/{epoch_ms}.jpg"
 
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            annotated = self._annotate_frame(frame, faces, state, motion_score, confidence)
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
 
             self.s3.put_object(
                 Bucket=S3_BUCKET,
@@ -481,6 +581,44 @@ class ChewingAnalyzer:
         except Exception:
             log.exception("MQTT 送信失敗")
 
+    def _publish_frame_change(
+        self,
+        change_type: str,
+        motion_score: float,
+        faces_count: int,
+        chewing_state: str,
+    ):
+        """フレーム変化イベントを MQTT で送信"""
+        if not self.iot_data:
+            return
+
+        now = datetime.now(timezone.utc)
+        date_str = now.strftime("%Y-%m-%d")
+        epoch_ms = int(now.timestamp() * 1000)
+        s3_key = f"frames/{THING_NAME}/{date_str}/{epoch_ms}.jpg"
+
+        payload = {
+            "deviceId": THING_NAME,
+            "timestamp": now.isoformat(),
+            "changeType": change_type,
+            "details": {
+                "diffScore": int(motion_score),
+                "facesDetected": faces_count,
+                "chewingState": chewing_state,
+            },
+            "s3Key": s3_key,
+        }
+
+        try:
+            self.iot_data.publish(
+                topic=MQTT_FRAME_CHANGE_TOPIC,
+                qos=0,
+                payload=json.dumps(payload),
+            )
+            log.info("フレーム変化通知: type=%s, motion=%d", change_type, int(motion_score))
+        except Exception:
+            log.exception("フレーム変化 MQTT 送信失敗")
+
     def _upload_analyzed_frame(
         self,
         frame: np.ndarray,
@@ -494,29 +632,7 @@ class ChewingAnalyzer:
             return
 
         try:
-            annotated = frame.copy()
-
-            # 状態に応じた色: chewing=緑, stopped=黄, ended=赤
-            color_map = {
-                self.STATE_CHEWING: (0, 255, 0),
-                self.STATE_STOPPED: (0, 255, 255),
-                self.STATE_ENDED: (0, 0, 255),
-                self.STATE_WAITING: (128, 128, 128),
-            }
-            color = color_map.get(state, (255, 255, 255))
-
-            for fx, fy, fw, fh in faces:
-                # 顔バウンディングボックス
-                cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), color, 2)
-                # 口領域
-                mouth_y = int(fy + fh * (1 - self.mouth_ratio))
-                cv2.rectangle(annotated, (fx, mouth_y), (fx + fw, fy + fh), (255, 0, 0), 1)
-
-            # 状態とスコアとconfidenceのテキスト表示
-            label = f"{state} motion:{int(motion_score)} conf:{confidence:.2f}"
-            cv2.putText(annotated, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-            # JPEG エンコード
+            annotated = self._annotate_frame(frame, faces, state, motion_score, confidence)
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
             self.s3.put_object(

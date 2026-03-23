@@ -8,7 +8,8 @@ ComponentConfiguration:
   DefaultConfiguration:
     rtspUrl: "rtsp://noeatstop-mediamtx:8554/camera"
     s3Bucket: ""
-    captureInterval: "3"
+    captureInterval: "1"
+    liveFrameInterval: "3"
     awsRegion: "ap-northeast-1"
     s3Key: "live-frames/latest.jpg"
 Manifests:
@@ -23,6 +24,7 @@ Manifests:
         export RTSP_URL="{configuration:/rtspUrl}"
         export S3_BUCKET="{configuration:/s3Bucket}"
         export CAPTURE_INTERVAL="{configuration:/captureInterval}"
+        export LIVE_FRAME_INTERVAL="{configuration:/liveFrameInterval}"
         export AWS_REGION="{configuration:/awsRegion}"
         export S3_KEY="{configuration:/s3Key}"
         node capture.js
