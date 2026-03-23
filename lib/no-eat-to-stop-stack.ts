@@ -226,6 +226,7 @@ export class NoEatToStopStack extends cdk.Stack {
         this.tvControlEventsTable.tableArn,
         this.frameHistoryTable.tableArn,
         this.labelsTable.tableArn,
+        frameChangeEventsTable.tableArn,
       ],
     }));
 

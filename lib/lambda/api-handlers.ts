@@ -579,12 +579,18 @@ export async function handleFrameChange(event: Record<string, unknown>): Promise
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const epochSeconds = typeof event.timestamp === 'string'
-    ? Math.floor(new Date(event.timestamp as string).getTime() / 1000)
-    : now;
+  let epochSeconds = now;
+  if (typeof event.timestamp === 'string') {
+    const parsed = Math.floor(new Date(event.timestamp as string).getTime() / 1000);
+    if (!isNaN(parsed)) epochSeconds = parsed;
+  }
   const expiresAt = epochSeconds + 7 * 86400; // 7日保持
 
   const details = (event.details || {}) as Record<string, unknown>;
+
+  if (!event.s3Key) {
+    console.warn(`FrameChange: s3Key が空です (device=${event.deviceId}, type=${event.changeType})`);
+  }
 
   const item: Record<string, { S: string } | { N: string }> = {
     deviceId: { S: String(event.deviceId || 'unknown') },

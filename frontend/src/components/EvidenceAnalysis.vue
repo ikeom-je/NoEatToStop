@@ -115,7 +115,7 @@ onMounted(() => {
             <span class="text-gray-500">{{ formatTime(ev.timestamp) }}</span>
             <span
               class="inline-block px-2 py-0.5 rounded text-xs font-medium"
-              :class="ev.chewingState === 'chewing' ? 'bg-green-100 text-green-800' : ev.chewingState === 'chewing_stopped' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'"
+              :class="ev.chewingState === 'chewing' ? 'bg-green-100 text-green-800' : ev.chewingState === 'chewing_stopped' ? 'bg-yellow-100 text-yellow-800' : ev.chewingState === 'meal_ended' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'"
             >
               {{ stateLabels[ev.chewingState] || ev.chewingState }}
             </span>
