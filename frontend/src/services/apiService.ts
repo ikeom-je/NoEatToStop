@@ -203,6 +203,28 @@ export const labelsApi = {
   },
 };
 
+export interface FrameChangeEvent {
+  deviceId: string;
+  epochSeconds: number;
+  changeType: string;
+  s3Key: string;
+  evidenceUrl: string;
+  diffScore: number;
+  facesDetected: number;
+  chewingState: string;
+  timestamp: string;
+}
+
+export const frameChangeApi = {
+  async getRecent(deviceId?: string, limit?: number): Promise<FrameChangeEvent[]> {
+    const params = new URLSearchParams();
+    if (deviceId) params.set('deviceId', deviceId);
+    if (limit) params.set('limit', String(limit));
+    const { data } = await apiClient.get<{ items: FrameChangeEvent[] }>(`/frame-changes?${params}`);
+    return data.items;
+  },
+};
+
 export const videoApi = {
   async getLatestFrameUrl(): Promise<string> {
     const { data } = await apiClient.get<{ url: string }>('/video/latest-frame');
