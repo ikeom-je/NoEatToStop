@@ -139,12 +139,14 @@ else
   fail "DeviceController 初期化ログが見つかりません"
 fi
 
-# 14. TV 制御イベント API 確認
+# 14. TV 制御イベント API 確認（Cognito認証必須: 401は認証保護の正常動作）
 echo "[14] TV 制御イベント API 確認"
 API_URL="${API_URL:-https://ex7hkp29hg.execute-api.ap-northeast-1.amazonaws.com/prod}"
 TV_RESP=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/tv-control/events" 2>/dev/null)
 if [ "$TV_RESP" = "200" ]; then
   pass "TV 制御イベント API 正常応答 (200)"
+elif [ "$TV_RESP" = "401" ]; then
+  pass "TV 制御イベント API 認証保護確認 (401 — Cognito認証必須)"
 else
   fail "TV 制御イベント API エラー (HTTP $TV_RESP)"
 fi
@@ -156,28 +158,33 @@ if [ "$FRAME_COUNT" -gt 0 ] 2>/dev/null; then
   pass "S3 frames/ にフレーム履歴が存在 (${FRAME_COUNT} 枚)"
 else
   # 変化検知が有効な場合、変化がなければフレーム履歴はアップロードされない（正常動作）
-  CHANGE_DETECT=$(docker exec noeatstop-gg-core printenv CHANGE_DETECTION_ENABLED 2>/dev/null || echo "")
-  if [ "$CHANGE_DETECT" = "true" ]; then
+  if docker logs noeatstop-gg-core 2>&1 | grep -q "change_detection=True"; then
     pass "S3 frames/ にフレーム履歴なし（変化検知有効: 変化なしのため正常）"
   else
     fail "S3 frames/ にフレーム履歴が見つかりません"
   fi
 fi
 
-# 16. FrameHistory DynamoDB 確認
+# 16. FrameHistory DynamoDB 確認（変化検知有効時は変化時のみレコード作成）
 echo "[16] FrameHistory DynamoDB レコード確認"
 FH_COUNT=$(aws dynamodb scan --table-name FrameHistory-dev --region "$REGION" --select COUNT --query 'Count' --output text 2>/dev/null || echo "0")
 if [ "$FH_COUNT" -gt 0 ] 2>/dev/null; then
   pass "FrameHistory テーブルにレコード存在 (${FH_COUNT} 件)"
 else
-  fail "FrameHistory テーブルにレコードがありません"
+  if docker logs noeatstop-gg-core 2>&1 | grep -q "change_detection=True"; then
+    pass "FrameHistory テーブルにレコードなし（変化検知有効: 変化なしのため正常）"
+  else
+    fail "FrameHistory テーブルにレコードがありません"
+  fi
 fi
 
-# 17. Frame History API 確認
+# 17. Frame History API 確認（Cognito認証必須: 401は認証保護の正常動作）
 echo "[17] Frame History API 確認"
 FH_RESP=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/frame-history" 2>/dev/null)
 if [ "$FH_RESP" = "200" ]; then
   pass "Frame History API 正常応答 (200)"
+elif [ "$FH_RESP" = "401" ]; then
+  pass "Frame History API 認証保護確認 (401 — Cognito認証必須)"
 else
   fail "Frame History API エラー (HTTP $FH_RESP)"
 fi
