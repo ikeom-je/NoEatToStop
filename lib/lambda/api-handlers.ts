@@ -116,6 +116,8 @@ export async function updateSetting(event: APIGatewayProxyEvent): Promise<APIGat
       const analyzerSettings = {
         chewingMotionThreshold: body.chewingDetectionThreshold ?? body.chewingMotionThreshold,
         faceDetectionScale: body.faceDetectionThreshold,
+        faceCascadeMinNeighbors: body.faceCascadeMinNeighbors,
+        faceCascadeMinSize: body.faceCascadeMinSize,
         mouthRoiRatio: body.mouthDetectionThreshold,
         pauseThreshold: body.pauseThreshold,
         analysisFrameCount: body.analysisFrameCount,
@@ -499,6 +501,8 @@ export async function getFrameHistory(event: APIGatewayProxyEvent): Promise<APIG
  * POST /labels — 検出画像に対するラベリングデータを保存（複数ラベル対応）
  * labels を DynamoDB StringSet として ADD で追加する
  */
+const ALLOWED_LABELS = ['ok', 'ng_face', 'ng_mouth', 'ng_chewing'];
+
 export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const tableName = process.env.LABELS_TABLE;
@@ -509,6 +513,9 @@ export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGateway
 
     if (!epochMs || !label) {
       return response(400, { error: 'epochMs and label are required' });
+    }
+    if (!ALLOWED_LABELS.includes(label)) {
+      return response(400, { error: `Invalid label. Allowed: ${ALLOWED_LABELS.join(', ')}` });
     }
 
     await ddbClient.send(new UpdateItemCommand({
@@ -549,6 +556,9 @@ export async function deleteLabel(event: APIGatewayProxyEvent): Promise<APIGatew
 
     if (!epochMs || !label) {
       return response(400, { error: 'epochMs and label are required' });
+    }
+    if (!ALLOWED_LABELS.includes(label)) {
+      return response(400, { error: `Invalid label. Allowed: ${ALLOWED_LABELS.join(', ')}` });
     }
 
     await ddbClient.send(new UpdateItemCommand({
