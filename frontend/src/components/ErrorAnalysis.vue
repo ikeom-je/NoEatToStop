@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { frameHistoryApi, labelsApi, type FrameHistoryRecord, type LabelRecord } from '@/services/apiService';
+import { frameHistoryApi, labelsApi, type FrameHistoryRecord } from '@/services/apiService';
 
 const frames = ref<FrameHistoryRecord[]>([]);
 const loading = ref(false);
