@@ -508,11 +508,15 @@ export async function saveLabel(event: APIGatewayProxyEvent): Promise<APIGateway
     const tableName = process.env.LABELS_TABLE;
     if (!tableName) return response(500, { error: 'LABELS_TABLE not configured' });
 
-    const body = JSON.parse(event.body || '{}');
+    let body;
+    try { body = JSON.parse(event.body || '{}'); } catch { return response(400, { error: 'Invalid JSON body' }); }
     const { deviceId, epochMs, s3Key, label, state, confidence, motionScore, facesDetected } = body;
 
     if (!epochMs || !label) {
       return response(400, { error: 'epochMs and label are required' });
+    }
+    if (typeof epochMs !== 'number' || !Number.isFinite(epochMs)) {
+      return response(400, { error: 'epochMs must be a valid number' });
     }
     if (!ALLOWED_LABELS.includes(label)) {
       return response(400, { error: `Invalid label. Allowed: ${ALLOWED_LABELS.join(', ')}` });
@@ -551,11 +555,15 @@ export async function deleteLabel(event: APIGatewayProxyEvent): Promise<APIGatew
     const tableName = process.env.LABELS_TABLE;
     if (!tableName) return response(500, { error: 'LABELS_TABLE not configured' });
 
-    const body = JSON.parse(event.body || '{}');
+    let body;
+    try { body = JSON.parse(event.body || '{}'); } catch { return response(400, { error: 'Invalid JSON body' }); }
     const { deviceId, epochMs, label } = body;
 
     if (!epochMs || !label) {
       return response(400, { error: 'epochMs and label are required' });
+    }
+    if (typeof epochMs !== 'number' || !Number.isFinite(epochMs)) {
+      return response(400, { error: 'epochMs must be a valid number' });
     }
     if (!ALLOWED_LABELS.includes(label)) {
       return response(400, { error: `Invalid label. Allowed: ${ALLOWED_LABELS.join(', ')}` });
