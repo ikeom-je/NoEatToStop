@@ -38,6 +38,8 @@ AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 # 咀嚼判定パラメータ
 CHEWING_MOTION_THRESHOLD = float(os.environ.get("CHEWING_MOTION_THRESHOLD", "500"))
 FACE_DETECTION_SCALE = float(os.environ.get("FACE_DETECTION_SCALE", "1.3"))
+FACE_CASCADE_MIN_NEIGHBORS = int(os.environ.get("FACE_CASCADE_MIN_NEIGHBORS", "5"))
+FACE_CASCADE_MIN_SIZE = int(os.environ.get("FACE_CASCADE_MIN_SIZE", "60"))
 MOUTH_ROI_RATIO = float(os.environ.get("MOUTH_ROI_RATIO", "0.3"))
 ANALYSIS_FRAME_COUNT = int(os.environ.get("ANALYSIS_FRAME_COUNT", "5"))
 PAUSE_THRESHOLD = float(os.environ.get("PAUSE_THRESHOLD", "10"))
@@ -115,16 +117,21 @@ class ChewingAnalyzer:
         # 動的パラメータ（設定ファイルで上書き可能）
         self.chewing_threshold = CHEWING_MOTION_THRESHOLD
         self.face_scale = FACE_DETECTION_SCALE
+        self.face_min_neighbors = FACE_CASCADE_MIN_NEIGHBORS
+        self.face_min_size = FACE_CASCADE_MIN_SIZE
         self.mouth_ratio = MOUTH_ROI_RATIO
         self.analysis_frames = ANALYSIS_FRAME_COUNT
         self.pause_threshold = PAUSE_THRESHOLD
 
         log.info(
             "ChewingAnalyzer 初期化完了: threshold=%.0f, scale=%.1f, "
+            "min_neighbors=%d, min_size=%d, "
             "mouth_ratio=%.2f, frames=%d, pause=%.0fs, "
             "change_detection=%s, pixel_diff_threshold=%.0f",
             self.chewing_threshold,
             self.face_scale,
+            self.face_min_neighbors,
+            self.face_min_size,
             self.mouth_ratio,
             self.analysis_frames,
             self.pause_threshold,
@@ -171,6 +178,8 @@ class ChewingAnalyzer:
             mapping = {
                 "chewingMotionThreshold": ("chewing_threshold", float),
                 "faceDetectionScale": ("face_scale", float),
+                "faceCascadeMinNeighbors": ("face_min_neighbors", int),
+                "faceCascadeMinSize": ("face_min_size", int),
                 "mouthRoiRatio": ("mouth_ratio", float),
                 "analysisFrameCount": ("analysis_frames", int),
                 "pauseThreshold": ("pause_threshold", float),
@@ -249,8 +258,8 @@ class ChewingAnalyzer:
         faces = self.face_cascade.detectMultiScale(
             gray,
             scaleFactor=self.face_scale,
-            minNeighbors=5,
-            minSize=(60, 60),
+            minNeighbors=self.face_min_neighbors,
+            minSize=(self.face_min_size, self.face_min_size),
         )
 
         frame_h, frame_w = frame.shape[:2]

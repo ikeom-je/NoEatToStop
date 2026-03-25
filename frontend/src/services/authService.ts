@@ -101,7 +101,9 @@ export function getIdToken(): string | null {
   if (!token) return null;
 
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(atob(parts[1]!));
     if (payload.exp * 1000 < Date.now()) return null;
     return token;
   } catch {
@@ -118,7 +120,9 @@ export function getUserEmail(): string | null {
   if (!idToken) return null;
 
   try {
-    const payload = JSON.parse(atob(idToken.split('.')[1]));
+    const parts = idToken.split('.');
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(atob(parts[1]!));
     return payload.email || null;
   } catch {
     return null;

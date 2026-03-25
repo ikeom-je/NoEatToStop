@@ -12,6 +12,8 @@ ComponentConfiguration:
     # 咀嚼判定パラメータ
     chewingMotionThreshold: "500"
     faceDetectionScale: "1.3"
+    faceCascadeMinNeighbors: "5"
+    faceCascadeMinSize: "60"
     mouthROIRatio: "0.3"
     analysisFrameCount: "5"
     pauseThreshold: "10"
@@ -34,6 +36,8 @@ Manifests:
         export AWS_REGION="{configuration:/awsRegion}"
         export CHEWING_MOTION_THRESHOLD="{configuration:/chewingMotionThreshold}"
         export FACE_DETECTION_SCALE="{configuration:/faceDetectionScale}"
+        export FACE_CASCADE_MIN_NEIGHBORS="{configuration:/faceCascadeMinNeighbors}"
+        export FACE_CASCADE_MIN_SIZE="{configuration:/faceCascadeMinSize}"
         export MOUTH_ROI_RATIO="{configuration:/mouthROIRatio}"
         export ANALYSIS_FRAME_COUNT="{configuration:/analysisFrameCount}"
         export PAUSE_THRESHOLD="{configuration:/pauseThreshold}"
