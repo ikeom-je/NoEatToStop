@@ -1,125 +1,93 @@
-# NoEatToStop System
+# NoEatToStop System - 開発ガイド
 
-子供の食事中の咀嚼動作を監視し、食事が止まったときにテレビの電源を自動制御するスマートシステム。
+子供の食事中の咀嚼動作を監視し、食事停止時にテレビ電源を自動制御するスマートシステム。
 
-## プロジェクト構成
+## 作業開始前のチェック（必読・全エージェント共通）
 
-### 仕様書
-- `.kiro/specs/requirements.md` - 要件定義
-- `.kiro/specs/design.md` - 設計書
-- `.kiro/specs/tasks.md` - 実装タスク
+新しいタスク・Issue 対応・PR 作成に着手する前に、毎回必ず本セクションを再確認する。本プロジェクトは複数の AI エージェント・開発者が並行作業することを想定しており、各自が同じルールに従うことで仕様・規約・運用方針の一貫性を保つ。
 
-### 開発方針（Steering）
-- `.kiro/steering/product.md` - プロダクト概要
-- `.kiro/steering/architecture.md` - アーキテクチャ原則
-- `.kiro/steering/development.md` - 開発ガイド・コーディング指針
-- `.kiro/steering/git.md` - Git ワークフロー・コミット規約
-- `.kiro/steering/structure.md` - ディレクトリ構成・命名規則
-- `.kiro/steering/tech.md` - 技術スタック
-- `.kiro/steering/testing.md` - テスト戦略
-- `.kiro/steering/security.md` - セキュリティ標準
-- `.kiro/steering/environment.md` - 開発環境（Colima/Greengrass）
+1. **本ファイル（CLAUDE.md）を冒頭から再参照** — 仕様駆動開発ルール / 変更時の更新トリガー / 環境戦略 / 重要な設計原則
+2. **対象機能の仕様書を確認** — `.kiro/specs/{requirements.md, design.md, tasks.md}`
+3. **タスクに該当する steering ファイルを確認**:
+   - 新機能・アーキ変更 → [architecture.md](.kiro/steering/architecture.md), [structure.md](.kiro/steering/structure.md)
+   - 技術スタック・依存・環境変数 → [tech.md](.kiro/steering/tech.md), [development.md](.kiro/steering/development.md)
+   - テスト追加・テスト変更 → [testing.md](.kiro/steering/testing.md)
+   - PR 作成・コミット・ブランチ操作 → [git.md](.kiro/steering/git.md)
+   - 開発環境（Colima / Greengrass）→ [environment.md](.kiro/steering/environment.md)
+   - セキュリティ・認証 → [security.md](.kiro/steering/security.md)
+4. **並行作業時は git worktree を使用** — `dev` から作業ブランチを切り、`.worktrees/<branch-name>/` を作成（[git.md](.kiro/steering/git.md) 参照）
+5. **PR は `dev` をベースに作成** — レビュー後に `dev` へマージ、`main` への反映は `dev → main` の PR 経由のみ
 
-## 環境設定
+> 仕様駆動開発の根幹: **仕様 → 設計 → 実装 → ドキュメント整合**。途中でルール確認を省略すると、複数エージェント間でドリフトが発生する。
 
-### 管理方針
+## 仕様書
 
-- **テンプレート（Git 管理対象）**: `.env.local.example`, `edge/.env.example`
-- **実値（Git 管理外）**: `.env.local`, `edge/.env`
-- 各開発者は `.env.local.example` をコピーして `.env.local` を作成し、自分の環境値（AWS アカウント情報・リージョン・Cognito ID 等）を記入する
-- 値の追加・変更が必要になった場合は、**`.env.local.example` のテンプレートも同時に更新**してチームに共有する（実値ファイルはコミット禁止）
+| ファイル | 内容 |
+|---------|------|
+| [.kiro/specs/requirements.md](.kiro/specs/requirements.md) | 要件定義（受入基準付き） |
+| [.kiro/specs/design.md](.kiro/specs/design.md) | 設計書 |
+| [.kiro/specs/tasks.md](.kiro/specs/tasks.md) | 実装タスク |
 
-### 利用フロー
+## 開発ルール（詳細は各ファイル参照）
 
-```bash
-# 初回セットアップ
-cp .env.local.example .env.local
-cp edge/.env.example edge/.env
-# 値を編集
+| ファイル | 内容 |
+|---------|------|
+| [.kiro/steering/product.md](.kiro/steering/product.md) | プロダクト概要・対象ユーザー |
+| [.kiro/steering/architecture.md](.kiro/steering/architecture.md) | アーキテクチャ原則・レイヤー・データモデル・API 設計 |
+| [.kiro/steering/structure.md](.kiro/steering/structure.md) | ディレクトリ構成・命名規則・CDK スタック構成 |
+| [.kiro/steering/tech.md](.kiro/steering/tech.md) | 技術スタック・バージョン・ビルドコマンド |
+| [.kiro/steering/development.md](.kiro/steering/development.md) | 開発ガイド・Lambda パターン・`.env.local` 管理 |
+| [.kiro/steering/testing.md](.kiro/steering/testing.md) | テスト戦略・E2E（Playwright）・カバレッジ目標 |
+| [.kiro/steering/git.md](.kiro/steering/git.md) | Git ワークフロー・Conventional Commits・PR ガイドライン |
+| [.kiro/steering/security.md](.kiro/steering/security.md) | セキュリティ標準・Cognito 認証・IAM 最小権限・PII 取扱い |
+| [.kiro/steering/environment.md](.kiro/steering/environment.md) | 開発環境（Colima / Greengrass）・Mac vs RPi 差異 |
 
-# 開発・デプロイ・E2E テスト前に必ず環境変数として適用
-source .env.local
-```
+## 変更時のドキュメント更新トリガー
 
-- 開発・デプロイ・テストスクリプト実行前に必ず `source .env.local` で環境変数化すること
-- AWS 関連エラー時はまず `.env.local` の値を確認
-- ハードコードされた AWS アカウント ID・リージョン・URL は禁止。必ず環境変数を参照する
-- 詳細: `.kiro/steering/development.md` の「環境設定ファイル」セクション
+実装変更を加えたら、変更種別に応じて以下のドキュメントを必ず同時更新する。
 
-## Edge 環境（RTSP + IoT Greengrass）
+| 変更したもの | 必ず更新するドキュメント |
+|-----------|-------------------|
+| 新 API パラメータ | `specs/requirements.md`（AC 追加）+ `specs/design.md`（パラメータ表）+ `steering/architecture.md` |
+| 新 Lambda エンドポイント | `steering/architecture.md`（エンドポイント表）+ `specs/requirements.md`（Req）+ `specs/design.md`（API） |
+| 新環境変数 | `steering/development.md`（変数一覧）+ `.env.local.example`（テンプレ）+ 必要に応じて `specs/design.md` |
+| 新 Lambda 関数 | `steering/architecture.md` + `steering/structure.md`（依存）+ `specs/design.md` |
+| デプロイ手順・Edge 構成 | `steering/environment.md` または `steering/development.md` + `edge/README.md` |
+| 新テストコマンド | `steering/testing.md` + `package.json` |
+| 依存パッケージ | `steering/tech.md`（バージョン制約も） |
+| Git / PR ルール | `steering/git.md` |
+| バージョン更新 | `package.json` + `steering/product.md` |
 
-- 詳細: `edge/README.md`
-- Edge 環境変数: `edge/.env`（Git管理外）、テンプレート: `edge/.env.example`
-- Docker Compose: `edge/docker-compose.yml`（greengrass-core / mediamtx / frame-capture-dev）
+## 環境戦略
 
-### Mac vs RPi の違い
-- **Mac 開発環境**: frame-capture → S3 パイプラインのみ。Greengrass Core は macOS 上で動作しない（IPC 制限）
-- **RPi 本番環境**: Greengrass Core 単一コンテナ内で FrameCapture + ChewingAnalyzer を統合実行 + IoT Core MQTT 連携
+単一 AWS アカウント内で 3 環境（dev / staging / prod）をスタック名サフィックスで分離。
+開発フロー: `feature/* → dev → main`（dev は統合・検証、main は安定版、すべて PR 経由）
 
-### RTSP 接続パターン
-- **パターン A（MediaMTX 経由）**: `RTSP_URL` 未設定時。ホスト側 ffmpeg でカメラ映像を MediaMTX に配信
-  - Mac: `edge/start-camera.sh`（avfoundation）
-  - RPi: `edge/start-camera-rpi.sh`（v4l2 + mjpeg）
-- **パターン B（IP カメラ直接）**: `RTSP_URL` 設定時。FrameCapture が直接接続。MediaMTX・start-camera スクリプト不要
+- ローカル設定: `.env.local`（Git 管理外）。テンプレ `.env.local.example` をコピーして編集し、`source .env.local` で適用
+- 詳細・全変数表: [steering/development.md](.kiro/steering/development.md) の「環境設定ファイル」セクション
 
-### 起動手順
-- **Mac 開発**: `docker compose up mediamtx --profile dev frame-capture-dev -d --build` → `./start-camera.sh`
-- **RPi 本番（IP カメラ）**: `docker compose up greengrass-core -d --build`（コンテナ1つのみ）
-- **RPi 本番（USB カメラ）**: `docker compose up greengrass-core mediamtx -d --build` → `./start-camera-rpi.sh`
-- **E2E テスト** (RPi のみ): `./edge/e2e-test.sh`（12項目: GG稼働・HEALTHY・MQTT・S3読書・GGログ・FrameCapture・S3フレーム・ChewingAnalyzer・初期化・MQTT→DynamoDB結合・MQTT送信ログ）
+## 重要な設計原則
 
-### Greengrass コンポーネント
-- **FrameCapture** (Node.js): RTSP → ffmpeg → `/tmp/frame.jpg` → S3 `live-frames/latest.jpg`
-- **ChewingAnalyzer** (Python + OpenCV): `/tmp/frame.jpg` 監視 → 顔検出(Haar Cascade) → 口領域差分 → 咀嚼判定 → BB付き画像を S3 `live-frames/latest-analyzed.jpg` にアップロード → 状態変化時に MQTT 送信
+1. **仕様駆動開発**: `tasks.md` の AC を満たすテスト・実装を行い、完了時にチェックボックスを `[x]` に更新
+2. **IAM 最小権限**: Lambda は必要なリソース ARN だけに権限付与（ワイルドカード禁止）
+3. **環境変数で参照**: AWS アカウント ID・リージョン・URL は `.env.local` 経由。ハードコード禁止
+4. **PII 不在ログ**: 構造化ログには個人情報を含めない（詳細 [security.md](.kiro/steering/security.md)）
+5. **Edge → Cloud 認証**: Greengrass は IoT Core 証明書、フロントは Cognito PKCE
+6. **言語**: ドキュメント・コメント・チャット応答は日本語（コードの識別子は英語）
+7. **パッケージマネージャー**: npm（pnpm は使わない）
+8. **作業ディレクトリ**: 一時ファイルは `./working/`（Git 管理外）
 
-### MQTT → DynamoDB パイプライン
-- **トピック**: `noeatstop/{deviceId}/chewing-state`
-- **IoT Topic Rule** → Lambda `handleChewingState` → DynamoDB `ChewingStates` テーブル
-- **TTL**: `expiresAt` 属性で自動削除（デフォルト7日、`chewingStateRetentionDays` 設定で変更可能）
-- **IOT_ENDPOINT**: `edge/.env` に設定。`aws iot describe-endpoint --endpoint-type iot:Data-ATS` で取得
+## コミット
 
-### ChewingAnalyzer 咀嚼判定ロジック
-1. **顔検出**: OpenCV Haar Cascade（正面顔、minSize=60x60）
-2. **口領域**: 顔矩形の下部 30%（`MOUTH_ROI_RATIO`）を口領域と仮定
-3. **差分計算**: 前フレームとの口領域ピクセル差分量（`cv2.absdiff` → `np.sum`）
-4. **咀嚼判定**: 直近5フレーム（`ANALYSIS_FRAME_COUNT`）の平均差分量が閾値（`CHEWING_MOTION_THRESHOLD=500`）超 → chewing
-5. **状態**: chewing / chewing_stopped / meal_ended / waiting
-6. **エビデンス**: 状態変化時にBB付き画像を S3 `evidence/` にアップロード
+- 形式: `<type>(<scope>): <内容>`（例: `feat(api): エビデンス取得エンドポイント追加`）
+- 本文は日本語で「なぜ」を記述
+- 詳細: [steering/git.md](.kiro/steering/git.md)
 
-## 認証（Cognito）
-
-- 管理画面は Amazon Cognito User Pool + PKCE Authorization Code Flow で保護
-- セルフサインアップ無効。ユーザーは管理者が AWS CLI で招待
-- CDK デプロイ時に `UserPoolId`, `UserPoolClientId`, `CognitoDomainName` が outputs に出力される
-- フロントエンドビルド時に `.env.local` の `VITE_COGNITO_*` 環境変数が必要:
-  - `VITE_COGNITO_DOMAIN` — Cognito Managed Login ドメイン
-  - `VITE_COGNITO_CLIENT_ID` — User Pool App Client ID
-  - `VITE_COGNITO_REDIRECT_URI` — `/callback` パスを含む CloudFront URL
-  - `VITE_COGNITO_LOGOUT_URI` — CloudFront ルート URL
-  - `COGNITO_USER_POOL_ID` — ユーザー管理用（フロントエンドでは不使用）
-- ユーザー管理: `aws cognito-idp admin-create-user` + `admin-set-user-password --permanent`
-- 認証関連ファイル:
-  - `frontend/src/services/authService.ts` — PKCE 生成、OAuth フロー、トークン管理
-  - `frontend/src/stores/authStore.ts` — Pinia 認証状態ストア
-  - `frontend/src/router/index.ts` — beforeEach 認証ガード
-  - `frontend/src/components/AuthCallback.vue` — OAuth callback
-  - `lib/no-eat-to-stop-stack.ts` — Cognito User Pool, App Client, Authorizer (CDK)
-
-## 開発ルール
-
-- **言語**: ドキュメント・コメント・チャット応答は日本語
-- **パッケージマネージャー**: npm（pnpmではない）
-- **作業ディレクトリ**: 一時ファイル・中間データは `./working/` に配置
-- **Git ブランチ**: `dev` が開発マージ用。機能ブランチは `dev` から作成し、e2eテストPASS後に `dev` へマージ
-- **Git 管理外**: `.claude/`, `.mcp.json`, `.env.local`, `working/`, credentials系ファイル
-- **環境設定**: AWS認証・リージョン等は `.env.local` から読み込む。エラー時はまず `.env.local` の値を確認すること
-
-## コマンド
+## デプロイ
 
 ```bash
-npm run build          # TypeScript ビルド
-npm run test           # 全テスト実行
-npm run test:unit      # ユニットテスト
-npm run deploy         # CDK デプロイ
-npm run deploy:all     # 全体デプロイ（VITE_COGNITO_* 環境変数を .env.local に設定してから実行）
+source .env.local         # 環境変数を適用
+npm run deploy:all        # CDK インフラ + フロントエンド
 ```
+
+段階デプロイ・Edge デプロイは [steering/development.md](.kiro/steering/development.md) および [steering/environment.md](.kiro/steering/environment.md) を参照。

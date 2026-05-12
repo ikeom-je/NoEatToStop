@@ -294,6 +294,72 @@ await eventBus.publish({
 });
 ```
 
+## Edge コンポーネントと MQTT パイプライン
+
+### Edge コンポーネント（Greengrass V2）
+
+Greengrass Core 単一コンテナ内に 2 コンポーネントを統合実行する。
+
+| コンポーネント | 実装 | 役割 |
+|----|----|----|
+| **FrameCapture** | Node.js + ffmpeg | RTSP → 1 fps でフレーム取得 → `/tmp/frame.jpg` → S3 `live-frames/latest.jpg` |
+| **ChewingAnalyzer** | Python 3.9 + OpenCV | `/tmp/frame.jpg` 監視 → 顔検出 + 咀嚼判定 → S3 `live-frames/latest-analyzed.jpg`（BB 付き）→ 状態変化時に MQTT 送信 |
+
+Mac 開発環境では `frame-capture-dev`（独立コンテナ、Docker Compose `--profile dev`）のみが動作し、Greengrass 由来のコンポーネントは使わない（macOS の IPC 制約）。詳細運用手順は [edge/README.md](../../edge/README.md)。
+
+### ChewingAnalyzer 咀嚼判定アルゴリズム
+
+1. **顔検出**: OpenCV Haar Cascade（正面顔、`minSize=60x60`、`FACE_CASCADE_MIN_NEIGHBORS` 可変）
+2. **口領域**: 顔矩形の下部 30%（`MOUTH_ROI_RATIO`）を口領域と仮定
+3. **差分計算**: 前フレームとの口領域ピクセル差分（`cv2.absdiff` → `np.sum`）
+4. **咀嚼判定**: 直近 5 フレーム（`ANALYSIS_FRAME_COUNT`）の平均差分量が閾値（`CHEWING_MOTION_THRESHOLD`、既定 500）超 → chewing
+5. **状態遷移**: `waiting` → `chewing` → `chewing_stopped` → `meal_ended`
+6. **エビデンス**: 状態変化時に BB 付き画像を S3 `evidence/` プレフィックスへアップロード
+
+主要パラメータは管理画面の SystemSettings 経由で MQTT で動的反映される（後述「設定反映フロー」）。
+
+### MQTT トピック規約
+
+| トピック | 方向 | 用途 |
+|----|----|----|
+| `noeatstop/{deviceId}/chewing-state` | Edge → Cloud | 咀嚼状態変化通知 |
+| `noeatstop/{deviceId}/frame-change` | Edge → Cloud | フレーム変化イベント（顔検出/消失/動き/状態変化） |
+| `noeatstop/{deviceId}/settings` | Cloud → Edge | 検出パラメータの動的反映 |
+
+`{deviceId}` は Greengrass Thing Name（既定 `noeatstop-edge-device`）。`IOT_ENDPOINT` は `edge/.env` で設定し、`aws iot describe-endpoint --endpoint-type iot:Data-ATS` で取得する。
+
+### IoT Topic Rule → Lambda → DynamoDB
+
+```
+Edge (Greengrass)
+  ↓ MQTT publish: noeatstop/{deviceId}/chewing-state
+AWS IoT Core (Topic Rule)
+  ↓ select * from 'noeatstop/+/chewing-state'
+Lambda handleChewingState
+  ↓ PutItem with expiresAt (TTL)
+DynamoDB: ChewingStates テーブル
+```
+
+- TTL: `expiresAt` 属性で自動削除。既定 7 日、`chewingStateRetentionDays` 設定で変更可能
+- `frame-change` トピックも同様のパターンで `FrameChangeEvents` テーブルへ
+- Lambda 側は冪等性に注意（同一 messageId の二重受信が起こり得る）
+
+### 設定反映フロー
+
+```
+管理画面 → API Gateway → Lambda → DynamoDB (SystemSettings)
+                                       ↓ Stream / 明示 publish
+                                  Lambda publishSettings
+                                       ↓ MQTT publish
+                              noeatstop/{deviceId}/settings
+                                       ↓
+                              Greengrass コンポーネント
+                                       ↓ ホットリロード
+                              ChewingAnalyzer / FrameCapture
+```
+
+新規パラメータを追加する場合、`MQTT 送信側 Lambda`、`Greengrass 受信側コンポーネント`、`SystemSettings DynamoDB スキーマ` の 3 箇所を同時に更新する必要がある。
+
 ## Data Architecture
 
 ### Database Design Principles
