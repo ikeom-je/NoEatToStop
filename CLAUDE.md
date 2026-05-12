@@ -22,9 +22,29 @@
 
 ## 環境設定
 
-- **`.env.local`** にAWSアカウント情報・リージョン・環境名などの個人設定を記載
-- 開発・デプロイ時は必ず `.env.local` を読み込んで環境変数を使用すること
-- `.env.local` はGit管理外（コミット禁止）
+### 管理方針
+
+- **テンプレート（Git 管理対象）**: `.env.local.example`, `edge/.env.example`
+- **実値（Git 管理外）**: `.env.local`, `edge/.env`
+- 各開発者は `.env.local.example` をコピーして `.env.local` を作成し、自分の環境値（AWS アカウント情報・リージョン・Cognito ID 等）を記入する
+- 値の追加・変更が必要になった場合は、**`.env.local.example` のテンプレートも同時に更新**してチームに共有する（実値ファイルはコミット禁止）
+
+### 利用フロー
+
+```bash
+# 初回セットアップ
+cp .env.local.example .env.local
+cp edge/.env.example edge/.env
+# 値を編集
+
+# 開発・デプロイ・E2E テスト前に必ず環境変数として適用
+source .env.local
+```
+
+- 開発・デプロイ・テストスクリプト実行前に必ず `source .env.local` で環境変数化すること
+- AWS 関連エラー時はまず `.env.local` の値を確認
+- ハードコードされた AWS アカウント ID・リージョン・URL は禁止。必ず環境変数を参照する
+- 詳細: `.kiro/steering/development.md` の「環境設定ファイル」セクション
 
 ## Edge 環境（RTSP + IoT Greengrass）
 

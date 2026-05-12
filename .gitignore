@@ -41,6 +41,11 @@ cdk.out/
 *.js.map
 *.d.ts
 
+# Playwright artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
 # IDE
 .vscode/
 .idea/
