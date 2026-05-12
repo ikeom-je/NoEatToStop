@@ -28,6 +28,9 @@ edge/greengrass-v2/
 # Working directory (temporary files and intermediate data)
 working/
 
+# Git worktrees (project-local isolated workspaces)
+.worktrees/
+
 # Dependencies
 node_modules/
 
@@ -37,6 +40,11 @@ build/
 cdk.out/
 *.js.map
 *.d.ts
+
+# Playwright artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
 
 # IDE
 .vscode/

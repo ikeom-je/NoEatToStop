@@ -60,42 +60,63 @@
 
 ## 環境設定ファイル（.env.local）
 
-プロジェクトルートの `.env.local` にAWS認証情報やリージョンなどの個人設定を記載する。
+プロジェクトルートの `.env.local` に AWS 認証情報やリージョンなどの個人設定を記載する。
+
+### 管理方針
+
+- **テンプレ（Git 管理対象）**: `.env.local.example`
+- **実値（Git 管理外）**: `.env.local`
+- 開発者は `.env.local.example` をコピーして `.env.local` を作成し、自分の値を記入する
+- 変数を追加・変更する場合は `.env.local.example` のテンプレートも同時に更新してチームに共有する
+- 実値ファイル（`.env.local`）は絶対にコミットしない
+
+### 初回セットアップ
+
+```bash
+cp .env.local.example .env.local
+# エディタで .env.local を開き、値を記入
+```
 
 ### .env.local の項目
 
 | 変数名               | 説明                         | 例           |
 | -------------------- | ---------------------------- | ------------ |
-| `AWS_PROFILE`        | 使用するAWS CLIプロファイル  | `default`    |
-| `AWS_DEFAULT_REGION` | AWSリージョン                | `us-east-1`  |
-| `CDK_DEFAULT_REGION` | CDKデプロイ先リージョン      | `us-east-1`  |
+| `AWS_PROFILE`        | 使用する AWS CLI プロファイル  | `default`    |
+| `AWS_DEFAULT_REGION` | AWS リージョン                | `ap-northeast-1` |
+| `CDK_DEFAULT_REGION` | CDK デプロイ先リージョン      | `ap-northeast-1` |
 | `ENVIRONMENT`        | デプロイ環境名               | `dev`        |
-| `FRONTEND_URL`       | デプロイ後のフロントエンドURL | (デプロイ後に設定) |
-| `API_GATEWAY_URL`    | デプロイ後のAPI Gateway URL  | (デプロイ後に設定) |
+| `FRONTEND_URL`       | デプロイ後のフロントエンド URL | (デプロイ後に設定) |
+| `API_GATEWAY_URL`    | デプロイ後の API Gateway URL  | (デプロイ後に設定) |
 | `COGNITO_USER_POOL_ID` | Cognito User Pool ID（ユーザー管理用） | (CDK output `UserPoolId`) |
 | `VITE_COGNITO_DOMAIN` | Cognito Managed Login ドメイン | `noeatstop-dev.auth.ap-northeast-1.amazoncognito.com` |
 | `VITE_COGNITO_CLIENT_ID` | Cognito App Client ID | (CDK output `UserPoolClientId`) |
 | `VITE_COGNITO_REDIRECT_URI` | 認証コールバック URL | `https://<cloudfront-domain>/callback` |
 | `VITE_COGNITO_LOGOUT_URI` | ログアウト後リダイレクト URL | `https://<cloudfront-domain>/` |
+| `COGuser`            | E2E テスト用 Cognito ユーザー（メールアドレス） | (Playwright で利用) |
+| `COGpw`              | E2E テスト用 Cognito ユーザーパスワード        | (Playwright で利用) |
 
-### 使い方
+### 使い方（必ず source で適用）
 
 ```bash
-# 開発・デプロイ前に必ず読み込む
+# 開発・デプロイ・E2E テスト前に必ず source で環境変数を適用する
 source .env.local
 
-# CDKデプロイ
+# CDK デプロイ
 npx cdk deploy --context stage=$ENVIRONMENT
 
-# デプロイスクリプト経由（自動的にsourceされる）
+# デプロイスクリプト経由（スクリプト内で source される）
 ./scripts/deploy-all.sh
+
+# Playwright E2E テスト（要 COGuser / COGpw）
+cd frontend && npm run test:e2e
 ```
 
 ### 重要なルール
 
-- `.env.local` はGit管理外（`.gitignore` に追加済み）
-- AWS関連エラーが発生した場合、まず `.env.local` の設定値を確認すること
-- ハードコードされたAWSアカウントID・リージョン・URLは禁止。必ず環境変数を参照する
+- `.env.local` は Git 管理外（`.gitignore` に追加済み）
+- 値の追加・変更は **`.env.local.example` も同時に更新** すること（テンプレ整備を忘れずに）
+- AWS 関連エラーが発生した場合、まず `.env.local` の設定値を確認すること
+- ハードコードされた AWS アカウント ID・リージョン・URL は禁止。必ず環境変数を参照する
 
 ## 開発環境のセットアップ
 
