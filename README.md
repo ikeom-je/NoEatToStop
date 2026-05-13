@@ -65,7 +65,6 @@ Greengrass Core (Docker)
 | カメラドライバ | avfoundation | v4l2 (USB) / RTSP (IP) |
 | Docker ランタイム | Colima 推奨 | Docker Engine |
 | カメラ配信 | `edge/start-camera.sh` | `edge/start-camera-rpi.sh` または IP カメラ直接 |
-| E2E テスト | Playwright（フロント） | `edge/e2e-test.sh`（10 項目） |
 
 詳細は [.kiro/steering/environment.md](.kiro/steering/environment.md) と [edge/README.md](edge/README.md) を参照。
 
@@ -201,11 +200,11 @@ aws cognito-idp admin-set-user-password \
 
 1. 関連 issue を確認、または新規 issue を起票
 2. `dev` から `issue/<番号>/<topic>` ブランチを作成
-3. 変更を実装、テスト追加・更新
+3. 変更を実装、テストを追加・更新
 4. PR を作成（base: `dev`）
 5. レビュー後にマージ。`main` への反映は `dev → main` の PR 経由のみ
 
-ブランチ命名・コミット規約は [.kiro/steering/git.md](.kiro/steering/git.md) を参照。
+ブランチ命名・コミット規約は [.kiro/steering/git.md](.kiro/steering/git.md)、テスト戦略・実行方法は [.kiro/steering/testing.md](.kiro/steering/testing.md) を参照。
 
 ## ドキュメント
 
