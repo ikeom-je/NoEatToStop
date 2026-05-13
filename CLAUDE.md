@@ -6,19 +6,21 @@
 
 ## 詳細情報の参照先
 
-- `.kiro/specs/requirements.md` 要件定義（受入基準付き）
-- `.kiro/specs/design.md` 設計書
-- `.kiro/specs/tasks.md` 実装タスク
-- `.kiro/steering/product.md` プロダクト概要
-- `.kiro/steering/architecture.md` アーキテクチャ全体・Edge コンポーネント・ChewingAnalyzer アルゴリズム・MQTT/DynamoDB パイプライン
-- `.kiro/steering/development.md` 開発ガイド・Lambda パターン・`.env.local` 変数一覧
-- `.kiro/steering/git.md` Git ワークフロー・Conventional Commits・PR ガイドライン
-- `.kiro/steering/structure.md` ディレクトリ構成・命名規則・CDK スタック構成
-- `.kiro/steering/tech.md` 技術スタック・バージョン
-- `.kiro/steering/testing.md` テスト戦略・E2E (Playwright)
-- `.kiro/steering/security.md` セキュリティ・Cognito (PKCE) 認証・IAM 最小権限・PII 取扱い
-- `.kiro/steering/environment.md` 開発環境（Colima / Greengrass）・Mac vs RPi 差異
-- `edge/README.md` Edge 運用（RTSP・docker compose・起動手順・E2E テスト）
+必要時に Claude Code が自動取り込みできるよう `@` プレフィックス付きで列挙する。
+
+- @.kiro/specs/requirements.md 要件定義（受入基準付き）
+- @.kiro/specs/design.md 設計書
+- @.kiro/specs/tasks.md 実装タスク
+- @.kiro/steering/product.md プロダクト概要
+- @.kiro/steering/architecture.md アーキテクチャ全体・Edge コンポーネント・ChewingAnalyzer アルゴリズム・MQTT/DynamoDB パイプライン
+- @.kiro/steering/development.md 開発ガイド・Lambda パターン・`.env.local` 変数一覧
+- @.kiro/steering/git.md Git ワークフロー・Conventional Commits・PR ガイドライン
+- @.kiro/steering/structure.md ディレクトリ構成・命名規則・CDK スタック構成
+- @.kiro/steering/tech.md 技術スタック・バージョン
+- @.kiro/steering/testing.md テスト戦略・E2E (Playwright)
+- @.kiro/steering/security.md セキュリティ・Cognito (PKCE) 認証・IAM 最小権限・PII 取扱い
+- @.kiro/steering/environment.md 開発環境（Colima / Greengrass）・Mac vs RPi 差異
+- @edge/README.md Edge 運用（RTSP・docker compose・起動手順・E2E テスト）
 
 ## 必ず守るルール
 
@@ -37,14 +39,14 @@
 
 実装の前後で次を必ず行う。
 
-1. 着手前: 対象機能の `specs/requirements.md` 受入基準と `specs/tasks.md` を確認
+1. 着手前: 対象機能の @.kiro/specs/requirements.md の受入基準と @.kiro/specs/tasks.md を確認
 2. 実装中: 関連 steering ファイルの規約に従う
-3. 完了時: `tasks.md` の該当チェックボックスを `[x]` に更新し、関連ドキュメント（specs / steering / `.env.local.example` / `edge/README.md`）を同時更新
+3. 完了時: @.kiro/specs/tasks.md の該当チェックボックスを `[x]` に更新し、関連ドキュメント（specs / steering / @.env.local.example / @edge/README.md）を同時更新
 
 ## 環境変数 `.env.local`
 
 - AWS アカウント / リージョン / Cognito クライアント / テストユーザー資格情報 (`COGuser`, `COGpw`) などを格納
-- テンプレ: `.env.local.example`（Edge は `edge/.env.example`）
+- テンプレ: @.env.local.example（Edge は @edge/.env.example）
 - 利用手順: テンプレをコピー → 値を記入 → `source .env.local` で環境変数化してから開発・デプロイ
 - フロントビルド時は `VITE_COGNITO_*` を `.env.local` に揃えてから `npm run deploy:all`
 - エラー時はまず `.env.local` の値を確認
@@ -60,4 +62,4 @@ npm run deploy         # CDK デプロイ
 npm run deploy:all     # CDK + フロントエンド（VITE_COGNITO_* 設定後）
 ```
 
-Edge 起動手順・E2E テスト (`./edge/e2e-test.sh`) は `edge/README.md` を参照。
+Edge 起動手順・E2E テスト (`./edge/e2e-test.sh`) は @edge/README.md を参照。
