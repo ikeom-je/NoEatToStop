@@ -69,6 +69,9 @@ The CDK stack creates a multi-stage environment with the following resources:
 - **Resources**: PascalCase with descriptive names (`VideoBucket`, `MealSessionsTable`)
 - **Files**: kebab-case for CDK stacks (`no-eat-to-stop-stack.ts`)
 - **Environment**: Stage-based resource naming (`resource-name-{stage}`)
+  - `{stage}` は `staging`（`dev` ブランチ自動デプロイ）または `production`（`main` ブランチ自動デプロイ）
+  - スタック例: `NoEatToStopStack-staging`, `NoEatToStopStack-production`
+  - 既存の `-dev` サフィックスは新方針への移行で `-staging` に置き換える（詳細 @.kiro/steering/deployment.md）
 
 ## Development Workflow
 

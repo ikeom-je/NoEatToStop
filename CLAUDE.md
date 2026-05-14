@@ -20,6 +20,7 @@
 - @.kiro/steering/testing.md テスト戦略・E2E (Playwright)
 - @.kiro/steering/security.md セキュリティ・Cognito (PKCE) 認証・IAM 最小権限・PII 取扱い
 - @.kiro/steering/environment.md 開発環境（Colima / Greengrass）・Mac vs RPi 差異
+- @.kiro/steering/deployment.md AWS 環境戦略（dev→staging / main→production）・GitHub Actions CI/CD
 - @edge/README.md Edge 運用（RTSP・docker compose・起動手順・E2E テスト）
 
 ## 必ず守るルール
@@ -28,7 +29,7 @@
 - パッケージマネージャー: npm（pnpm 不使用）
 - 一時ファイル・中間データ: `./working/` 配下にのみ配置（Git 管理外）
 - Git 管理外: `.claude/`, `.mcp.json`, `.env.local`, `working/`, credentials 系
-- ブランチ運用: `main` への直接コミット禁止。`feature → dev → main` の PR フロー。複数 AI が並行する前提のため必ず issue 番号付き作業ブランチ（例: `issue/21/...`）を `dev` から切る
+- ブランチ運用: `main` への直接コミット禁止。`feature → dev → main` の PR フロー。`dev` ブランチが staging 環境、`main` ブランチが production 環境に自動デプロイされる（@.kiro/steering/deployment.md）。複数 AI が並行する前提のため必ず issue 番号付き作業ブランチ（例: `issue/21/...`）を `dev` から切る
 - 並行作業時は git worktree (`.worktrees/<branch-name>/`) を活用
 - issue close 前: 本文「完了条件」のチェックボックスを 1 件ずつ検証し `[x]` に更新してから close
 - `.env.local` の取り扱い: 秘匿情報のため Read ツール直接使用禁止。Bash 経由で `source .env.local` または `sed` で必要な値のみ取得
