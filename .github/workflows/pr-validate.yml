@@ -1,0 +1,61 @@
+name: PR Validate
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+concurrency:
+  group: pr-validate-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  build-and-test:
+    name: Build, unit test, cdk diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install backend deps
+        run: npm ci --no-audit --no-fund
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Frontend type check
+        working-directory: frontend
+        run: npx vue-tsc -b
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ vars.AWS_VALIDATE_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_VALIDATE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+
+      - name: cdk diff (staging stacks)
+        if: ${{ vars.AWS_VALIDATE_ROLE_ARN != '' }}
+        run: |
+          npx cdk diff NoEatToStopCicd || true
+          npx cdk diff NoEatToStopStack-staging --context stage=staging || true
+          npx cdk diff NoEatToStopFrontend-staging --context stage=staging || true
