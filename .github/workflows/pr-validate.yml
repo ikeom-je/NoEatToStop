@@ -47,15 +47,24 @@ jobs:
         run: npx vue-tsc -b
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ vars.AWS_VALIDATE_ROLE_ARN != '' }}
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.AWS_VALIDATE_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_VALIDATE_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
 
-      - name: cdk diff (staging stacks)
-        if: ${{ vars.AWS_VALIDATE_ROLE_ARN != '' }}
+      - name: cdk diff (staging stacks for dev PR)
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.AWS_VALIDATE_ROLE_ARN != '' && github.base_ref == 'dev' }}
+        continue-on-error: true
         run: |
-          npx cdk diff NoEatToStopCicd || true
-          npx cdk diff NoEatToStopStack-staging --context stage=staging || true
-          npx cdk diff NoEatToStopFrontend-staging --context stage=staging || true
+          npx cdk diff NoEatToStopCicd
+          npx cdk diff NoEatToStopStack-staging --context stage=staging
+          npx cdk diff NoEatToStopFrontend-staging --context stage=staging
+
+      - name: cdk diff (production stacks for main PR)
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.AWS_VALIDATE_ROLE_ARN != '' && github.base_ref == 'main' }}
+        continue-on-error: true
+        run: |
+          npx cdk diff NoEatToStopCicd
+          npx cdk diff NoEatToStopStack-production --context stage=production
+          npx cdk diff NoEatToStopFrontend-production --context stage=production
