@@ -84,7 +84,7 @@ cp .env.local.example .env.local
 | `AWS_PROFILE`        | 使用する AWS CLI プロファイル  | `default`    |
 | `AWS_DEFAULT_REGION` | AWS リージョン                | `ap-northeast-1` |
 | `CDK_DEFAULT_REGION` | CDK デプロイ先リージョン      | `ap-northeast-1` |
-| `ENVIRONMENT`        | デプロイ環境名               | `dev`        |
+| `ENVIRONMENT`        | デプロイ環境名 (`staging` / `production`) | `staging` |
 | `FRONTEND_URL`       | デプロイ後のフロントエンド URL | (デプロイ後に設定) |
 | `API_GATEWAY_URL`    | デプロイ後の API Gateway URL  | (デプロイ後に設定) |
 | `COGNITO_USER_POOL_ID` | Cognito User Pool ID（ユーザー管理用） | (CDK output `UserPoolId`) |
@@ -101,7 +101,9 @@ cp .env.local.example .env.local
 # 開発・デプロイ・E2E テスト前に必ず source で環境変数を適用する
 source .env.local
 
-# CDK デプロイ
+# CDK デプロイ（ローカル手動デプロイ時）
+# - dev ブランチ作業 → stage=staging を指定
+# - main ブランチ作業 → stage=production を指定（原則 CI/CD 経由）
 npx cdk deploy --context stage=$ENVIRONMENT
 
 # デプロイスクリプト経由（スクリプト内で source される）
@@ -417,7 +419,7 @@ CDK デプロイ後、Cognito の設定値を `.env.local` に追記する:
 
 ```bash
 # CDK outputs から Cognito 設定を取得
-aws cloudformation describe-stacks --stack-name NoEatToStopStack-${ENVIRONMENT:-dev} \
+aws cloudformation describe-stacks --stack-name NoEatToStopStack-${ENVIRONMENT:-staging} \
   --query 'Stacks[0].Outputs[?contains(OutputKey,`UserPool`) || contains(OutputKey,`Cognito`)]' \
   --output table
 
