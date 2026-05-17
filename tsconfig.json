@@ -30,6 +30,9 @@
     "cdk.out",
     "dist",
     "coverage",
-    "frontend"
+    "frontend",
+    "test",
+    "**/__tests__/**",
+    "**/*.test.ts"
   ]
 }
