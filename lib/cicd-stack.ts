@@ -76,6 +76,15 @@ export class CicdStack extends cdk.Stack {
       ],
     });
 
+    // validateRole は pull_request イベントで assume されるため、OIDC token の
+    // job_workflow_ref は HEAD ブランチ（PR の feature branch）の ref を含む。
+    // StringEquals で `@refs/heads/dev` / `@refs/heads/main` のみ許可すると
+    // feature ブランチ PR が全て assume 失敗する。よって StringLike で
+    // ワークフローファイル名だけを pin し、ref は wildcard 許可する。
+    // 防御層:
+    //   - workflow 側 `if: head.repo.full_name == github.repository` で fork PR を遮断
+    //   - sub で `pull_request` イベントに限定
+    //   - StringLike pr-validate.yml@* で新規ワークフロー追加経由の bypass を防ぐ
     this.validateRole = new iam.Role(this, 'GitHubActionsValidateRole', {
       roleName: 'GitHubActionsValidateRole',
       assumedBy: new iam.WebIdentityPrincipal(
@@ -84,10 +93,9 @@ export class CicdStack extends cdk.Stack {
           StringEquals: {
             'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
             'token.actions.githubusercontent.com:sub': `${repoSub}:pull_request`,
-            'token.actions.githubusercontent.com:job_workflow_ref': [
-              `${workflowRefBase}/pr-validate.yml@refs/heads/dev`,
-              `${workflowRefBase}/pr-validate.yml@refs/heads/main`,
-            ],
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:job_workflow_ref': `${workflowRefBase}/pr-validate.yml@*`,
           },
         }
       ),
